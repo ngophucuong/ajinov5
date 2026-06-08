@@ -14,6 +14,7 @@ export interface ResearchState {
   wordCount: number;
   questionCount: number;
   errorMessage: string;
+  warningMessage?: string;
   elapsedMs: number;
 }
 
@@ -50,7 +51,8 @@ export default function ResearchProgressCard({
   onNavigateStudio,
   onClose,
 }: Props) {
-  const isActive = state.phase !== "done" && state.phase !== "error" && state.phase !== "idle";
+  const isActive =
+    state.phase !== "done" && state.phase !== "error" && state.phase !== "idle";
   const progressPct =
     state.totalQuestions > 0
       ? Math.round((state.currentIndex / state.totalQuestions) * 100)
@@ -131,6 +133,20 @@ export default function ResearchProgressCard({
             <span className="text-[9px] font-mono" style={{ color: C.mu }}>
               {state.currentIndex}/{state.totalQuestions}
             </span>
+          </div>
+        )}
+
+        {/* Warning banner */}
+        {state.warningMessage && isActive && (
+          <div
+            className="px-[10px] py-[5px] rounded-[5px] text-[10px] font-mono"
+            style={{
+              background: "rgba(212, 160, 90, 0.08)",
+              border: "0.5px solid rgba(212, 160, 90, 0.3)",
+              color: C.am,
+            }}
+          >
+            ⚠ {state.warningMessage}
           </div>
         )}
 
@@ -228,9 +244,8 @@ export default function ResearchProgressCard({
                   {state.docTitle}
                 </span>
                 <span className="text-[9px] font-mono" style={{ color: C.mu }}>
-                  {state.wordCount.toLocaleString()} từ ·{" "}
-                  {state.questionCount} câu hỏi · DeepSeek V4 Pro ·{" "}
-                  {fmtDuration(state.elapsedMs)}
+                  {state.wordCount.toLocaleString()} từ · {state.questionCount}{" "}
+                  câu hỏi · DeepSeek V4 Pro · {fmtDuration(state.elapsedMs)}
                 </span>
               </div>
             </div>

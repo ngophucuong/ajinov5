@@ -83,12 +83,45 @@ export interface ResearchErrorEvent {
   message: string;
 }
 
+export interface ResearchHeartbeatEvent {
+  event: "heartbeat";
+  elapsed: number;
+}
+
+export interface ResearchWarningEvent {
+  event: "warning";
+  elapsed: number;
+  message: string;
+}
+
 export type ResearchSSEEvent =
   | { event: "start" }
   | ResearchPlanEvent
   | ResearchProgressEvent
   | ResearchDoneEvent
-  | ResearchErrorEvent;
+  | ResearchErrorEvent
+  | ResearchHeartbeatEvent
+  | ResearchWarningEvent;
+
+// ─── Research V2 — Job types ─────────────────────────
+export interface ResearchSection {
+  id: string;
+  title: string;
+  status: "pending" | "running" | "done" | "failed";
+  content: string | null;
+}
+
+export interface ResearchJobStatus {
+  job_id: string;
+  status: string;
+  progress: number;
+  current_step: string;
+  plan_title: string | null;
+  sections: ResearchSection[];
+  error: string | null;
+  document_id: string | null;
+  completed_at: string | null;
+}
 
 // ─── Memory ──────────────────────────────────────────
 export interface MemoryItem {
@@ -170,3 +203,65 @@ export type SSEEvent =
       };
     }
   | { event: "error"; data: { code: string; message: string } };
+
+// ─── Mini App — Adaptive Mode ─────────────────────────
+export type AdaptiveModeType =
+  | "briefing"
+  | "premeeting"
+  | "capture"
+  | "chat"
+  | "memory";
+
+export interface AdaptiveModeResponse {
+  mode: AdaptiveModeType;
+  reason:
+    | "morning_routine"
+    | "meeting_soon"
+    | "post_meeting"
+    | "default"
+    | "learned_pattern";
+  confidence: number;
+  meeting: {
+    title: string;
+    start_time: string;
+    duration_min: number;
+    google_meet_url?: string;
+  } | null;
+}
+
+export interface ScheduleItem {
+  id: string;
+  time: string;
+  title: string;
+  duration_min: number;
+  tag?: string;
+}
+
+export interface MiniAppOpenLogEntry {
+  timestamp: string;
+  vn_hour: number;
+  mode_shown: string;
+  had_meeting_soon: boolean;
+  duration_seconds: number;
+}
+
+export interface MemorySearchResult {
+  id: string;
+  content: string;
+  score: number;
+  status: "canonical";
+  source: string;
+  created_at: string;
+}
+
+export interface PendingMemorySummary {
+  count: number;
+  breakdown: { chat: number; capture: number; studio: number; manual: number };
+}
+
+export interface ContextMemoryCard {
+  id: string;
+  content: string;
+  source_label: string;
+  created_ago: string;
+}

@@ -5,6 +5,7 @@ import Capture from "./pages/Capture";
 import Studio from "./pages/Studio";
 import Console from "./pages/Console";
 import Admin from "./pages/Admin";
+import Miniapp from "./pages/Miniapp";
 
 // ─── Floating Nav Chips (collapsible, blur backdrop) ──
 function NavSidebar() {
@@ -53,6 +54,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Chat />} />
           <Route path="/chat" element={<Navigate to="/" replace />} />
+          <Route path="/miniapp" element={<Miniapp />} />
           <Route path="/memory" element={<Memory />} />
           <Route path="/capture" element={<Capture />} />
           <Route path="/studio" element={<Studio />} />

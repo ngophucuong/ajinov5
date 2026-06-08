@@ -18,18 +18,14 @@ export default function Memory() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getMemories({ status: filter === "all" ? undefined : filter, limit: 50 });
+      const data = await getMemories({
+        status: filter === "all" ? undefined : filter,
+        limit: 50,
+      });
       setMemories(data);
     } catch (err) {
-      // Use demo data if API unavailable
-      setMemories([
-        { id: "1", content: "SF Express mở rộng cửa khẩu phụ từ tháng 5/2026", status: "canonical", source: "chat", created_at: "2026-06-01T10:00:00Z" },
-        { id: "2", content: "Thông quan nội bộ trung bình 4.2h/lô hàng", status: "canonical", source: "chat", created_at: "2026-06-02T14:00:00Z" },
-        { id: "3", content: "Viettel Post thử nghiệm AI customs tại Lạng Sơn", status: "pending", source: "capture", created_at: "2026-06-05T09:30:00Z" },
-        { id: "4", content: "Đối tác Hồng Kông yêu cầu tăng SLA lên 99.5%", status: "pending", source: "capture", created_at: "2026-06-06T11:00:00Z" },
-        { id: "5", content: "Chi phí logistics xuyên biên giới tăng 12% Q2/2026", status: "canonical", source: "studio", created_at: "2026-06-03T08:00:00Z" },
-        { id: "6", content: "Dự báo thị trường logistics Việt Nam đạt 55 tỷ USD 2027", status: "pending", source: "chat", created_at: "2026-06-07T16:00:00Z" },
-      ]);
+      setError("Không thể tải dữ liệu bộ nhớ");
+      setMemories([]);
     }
     setLoading(false);
   }
@@ -38,12 +34,16 @@ export default function Memory() {
     try {
       await apiUpdateMemory(id, { status: "canonical" });
       setMemories((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, status: "canonical" as const } : m)),
+        prev.map((m) =>
+          m.id === id ? { ...m, status: "canonical" as const } : m,
+        ),
       );
     } catch {
       // Optimistic update for demo
       setMemories((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, status: "canonical" as const } : m)),
+        prev.map((m) =>
+          m.id === id ? { ...m, status: "canonical" as const } : m,
+        ),
       );
     }
   }
@@ -52,17 +52,23 @@ export default function Memory() {
     try {
       await apiUpdateMemory(id, { status: "archived" });
       setMemories((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, status: "archived" as const } : m)),
+        prev.map((m) =>
+          m.id === id ? { ...m, status: "archived" as const } : m,
+        ),
       );
     } catch {
       setMemories((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, status: "archived" as const } : m)),
+        prev.map((m) =>
+          m.id === id ? { ...m, status: "archived" as const } : m,
+        ),
       );
     }
   }
 
   const pendingCount = memories.filter((m) => m.status === "pending").length;
-  const canonicalCount = memories.filter((m) => m.status === "canonical").length;
+  const canonicalCount = memories.filter(
+    (m) => m.status === "canonical",
+  ).length;
 
   return (
     <div className="flex flex-col h-screen">
@@ -94,22 +100,32 @@ export default function Memory() {
         <aside className="w-[230px] flex-shrink-0 bg-[#0c0f18] border-r border-[rgba(255,255,255,0.05)] flex flex-col p-4 gap-4">
           <div>
             <IconBrain size={32} className="text-[#d4a05a] mb-2" />
-            <h2 className="font-display text-lg font-semibold text-[#dde2ec]">Bộ Nhớ</h2>
-            <p className="font-mono text-[9px] text-[#52586a] mt-1 uppercase">Quản lý tri thức</p>
+            <h2 className="font-display text-lg font-semibold text-[#dde2ec]">
+              Bộ Nhớ
+            </h2>
+            <p className="font-mono text-[9px] text-[#52586a] mt-1 uppercase">
+              Quản lý tri thức
+            </p>
           </div>
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#12161f] border border-[rgba(255,255,255,0.05)]">
               <span className="text-[11px] text-[#52586a]">Tổng số</span>
-              <span className="font-mono text-sm text-[#dde2ec]">{memories.length}</span>
+              <span className="font-mono text-sm text-[#dde2ec]">
+                {memories.length}
+              </span>
             </div>
             <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-[rgba(212,160,90,0.06)] border border-[rgba(212,160,90,0.15)]">
               <span className="text-[11px] text-[#d4a05a]">Đã duyệt</span>
-              <span className="font-mono text-sm text-[#d4a05a]">{canonicalCount}</span>
+              <span className="font-mono text-sm text-[#d4a05a]">
+                {canonicalCount}
+              </span>
             </div>
             <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-[rgba(224,104,104,0.06)] border border-[rgba(224,104,104,0.15)]">
               <span className="text-[11px] text-[#e06868]">Chờ duyệt</span>
-              <span className="font-mono text-sm text-[#e06868]">{pendingCount}</span>
+              <span className="font-mono text-sm text-[#e06868]">
+                {pendingCount}
+              </span>
             </div>
           </div>
         </aside>
@@ -119,7 +135,11 @@ export default function Memory() {
           <div className="max-w-3xl mx-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display text-base font-semibold text-[#dde2ec]">
-                {filter === "all" ? "Tất cả bộ nhớ" : filter === "pending" ? "Bộ nhớ chờ duyệt" : "Bộ nhớ đã duyệt"}
+                {filter === "all"
+                  ? "Tất cả bộ nhớ"
+                  : filter === "pending"
+                    ? "Bộ nhớ chờ duyệt"
+                    : "Bộ nhớ đã duyệt"}
               </h3>
 
               <div className="flex gap-1">
@@ -141,7 +161,11 @@ export default function Memory() {
                       : "bg-transparent text-[#52586a] border border-[rgba(255,255,255,0.05)] hover:border-[rgba(255,255,255,0.09)]"
                   }`}
                 >
-                  {f === "all" ? "Tất cả" : f === "pending" ? "Chờ duyệt" : "Đã duyệt"}
+                  {f === "all"
+                    ? "Tất cả"
+                    : f === "pending"
+                      ? "Chờ duyệt"
+                      : "Đã duyệt"}
                 </button>
               ))}
             </div>

@@ -11,7 +11,15 @@ import {
   createSessionAndStream,
   streamResearch,
 } from "../lib/sse";
-import { createMemory, createDocument } from "../lib/api";
+import {
+  createMemory,
+  createSession,
+  renameSession,
+  deleteSession,
+  getSessions,
+  getSessionMessages,
+  startResearchV2,
+} from "../lib/api";
 import AgentNetwork from "../components/AgentNetwork";
 import ThinkingTrace from "../components/ThinkingTrace";
 import ContextPanel from "../components/ContextPanel";
@@ -19,45 +27,8 @@ import SendButton from "../components/SendButton";
 import ResearchProgressCard, {
   type ResearchState,
 } from "../components/ResearchProgressCard";
-
-// ─── Sample sessions ────────────────────────────────
-const DEMO_SESSIONS = [
-  {
-    id: "1",
-    title: "Phân tích đối thủ Q3",
-    time: "14:32",
-    tag: "strategy",
-    active: true,
-  },
-  {
-    id: "2",
-    title: "Review báo cáo tài chính",
-    time: "11:15",
-    tag: "finance",
-    active: false,
-  },
-  {
-    id: "3",
-    title: "Lịch công tác tháng 7",
-    time: "09:04",
-    tag: "ops",
-    active: false,
-  },
-  {
-    id: "4",
-    title: "Chiến lược mở rộng thị trường",
-    time: "Hôm qua 16:45",
-    tag: "strategy",
-    active: false,
-  },
-  {
-    id: "5",
-    title: "Đề xuất ngân sách Q4",
-    time: "Hôm qua 10:20",
-    tag: "finance",
-    active: false,
-  },
-];
+import ResearchPanel from "../components/ResearchPanel";
+import ConfirmModal from "../components/ConfirmModal";
 
 // ─── Messages in this session ──────────────────────
 interface UIMessage {
@@ -118,60 +89,137 @@ export default function Chat() {
     setOtp("");
   }
 
-  const [messages, setMessages] = useState<UIMessage[]>([
-    {
-      id: "m1",
-      role: "user",
-      content:
-        "Phân tích vị thế cạnh tranh trong logistics xuyên biên giới so với đối thủ lớn. Tập trung Q3.",
-    },
-    {
-      id: "m2",
-      role: "assistant",
-      content:
-        "Trong Q3/2026, vị thế logistics xuyên biên giới có **3 điểm phân hóa rõ** so với đối thủ.\n\nVề **tốc độ thông quan**, lợi thế nằm ở xử lý song song — trung bình `4.2h/lô` so với ngành 6–8h. Đây là moat ngắn hạn nhưng được định giá cao.\n\nVề **coverage mạng lưới**, các đối thủ lớn đang đầu tư mạnh vào cửa khẩu phụ từ Q2. Nếu không phản ứng trong Q4, lợi thế địa lý sẽ thu hẹp đáng kể vào 2027.",
-      trace: [
-        {
-          step: 1,
-          agent: "Decompose",
-          status: "done",
-          duration_ms: 180,
-          result: "3 câu hỏi con: market share, pricing, route coverage",
-        },
-        {
-          step: 2,
-          agent: "Memory search",
-          status: "done",
-          duration_ms: 340,
-          result: "7 facts canonical về competitive intel, Q2 data",
-        },
-        {
-          step: 3,
-          agent: "Serper",
-          status: "done",
-          duration_ms: 890,
-          result: "logistics Vietnam border Q3 2026 · 4 sources retrieved",
-        },
-        {
-          step: 4,
-          agent: "Synthesis",
-          status: "done",
-          duration_ms: 690,
-          result: "DeepSeek V4 Pro · context 12,400 tokens",
-        },
-      ],
-      reasoningMode: "deep",
-    },
-  ]);
+  const [messages, setMessages] = useState<UIMessage[]>([]);
   const [mode, setMode] = useState<ReasoningMode>("auto");
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>("1");
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [votes, setVotes] = useState<Record<string, "up" | "down">>({});
   const [researchArmed, setResearchArmed] = useState(false);
+  const [sessions, setSessions] = useState<
+    Array<{ id: string; title: string; time: string; tag?: string }>
+  >([]);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionTitle, setEditingSessionTitle] = useState("");
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [researchJobId, setResearchJobId] = useState<string | null>(null);
   const msgAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const researchAbortRef = useRef<AbortController | null>(null);
+
+  // ─── Session management ────────────────────────────
+  // Load sessions on mount
+  useEffect(() => {
+    getSessions()
+      .then((data) => {
+        if (data && data.length > 0) {
+          const mapped = data.map((s) => ({
+            id: s.id,
+            title: s.title || "Cuộc trò chuyện mới",
+            time: new Date(s.updated_at).toLocaleTimeString("vi-VN", {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            tag: s.tags?.[0],
+          }));
+          setSessions(mapped);
+          // Auto-select first session
+          if (!activeSessionId) {
+            setActiveSessionId(mapped[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load messages when active session changes
+  useEffect(() => {
+    if (!activeSessionId) {
+      setMessages([]);
+      return;
+    }
+    getSessionMessages(activeSessionId)
+      .then((data) => {
+        if (data && data.length > 0) {
+          setMessages(
+            data.map((m) => ({
+              id: m.id,
+              role: m.role as "user" | "assistant",
+              content: m.content,
+              trace: m.thinking_trace as ThinkingTraceStep[] | undefined,
+              reasoningMode: (m.reasoning_mode as ReasoningMode) || undefined,
+            })),
+          );
+        } else {
+          setMessages([]);
+        }
+      })
+      .catch(() => {
+        setMessages([]);
+      });
+  }, [activeSessionId]);
+
+  async function handleNewSession() {
+    try {
+      const s = await createSession();
+      setSessions((prev) => [
+        { id: s.id, title: s.title, time: "bây giờ" },
+        ...prev,
+      ]);
+      setActiveSessionId(s.id);
+      setMessages([]);
+    } catch {
+      const id = crypto.randomUUID();
+      setSessions((prev) => [
+        { id, title: "Cuộc trò chuyện mới", time: "bây giờ" },
+        ...prev,
+      ]);
+      setActiveSessionId(id);
+      setMessages([]);
+    }
+  }
+
+  async function handleRenameSession(id: string) {
+    if (!editingSessionTitle.trim()) {
+      setEditingSessionId(null);
+      return;
+    }
+    try {
+      await renameSession(id, editingSessionTitle.trim());
+    } catch {
+      // continue with local update
+    }
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === id ? { ...s, title: editingSessionTitle.trim() } : s,
+      ),
+    );
+    setEditingSessionId(null);
+    setEditingSessionTitle("");
+  }
+
+  async function handleDeleteSession(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setDeleteTargetId(id);
+  }
+
+  async function confirmDeleteSession() {
+    if (!deleteTargetId) return;
+    const id = deleteTargetId;
+    setDeleteTargetId(null);
+    try {
+      await deleteSession(id);
+    } catch {
+      // continue
+    }
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (activeSessionId === id) {
+      const remaining = sessions.filter((s) => s.id !== id);
+      setActiveSessionId(remaining[0]?.id || null);
+      setMessages([]);
+    }
+  }
 
   // ─── Deep Research state ───────────────────────────
   const initialResearchState: ResearchState = {
@@ -228,135 +276,109 @@ export default function Chat() {
     });
     researchStartRef.current = Date.now();
 
-    let usedRealBackend = false;
-
     try {
-      await streamResearch(trimmedTopic, {
-        onStart: () => {
-          usedRealBackend = true;
-          setResearch((prev) => ({ ...prev, phase: "planning" }));
-        },
-        onPlan: (questions) => {
-          setResearch((prev) => ({
-            ...prev,
-            phase: "researching",
-            questions,
-            totalQuestions: questions.length,
-            currentIndex: 0,
-            currentQuestion: questions[0] || "",
-          }));
-        },
-        onProgress: (step, question, index, total) => {
-          if (step === "researching") {
+      const controller = new AbortController();
+      researchAbortRef.current = controller;
+      await streamResearch(
+        trimmedTopic,
+        {
+          onStart: () => {
+            setResearch((prev) => ({ ...prev, phase: "planning" }));
+          },
+          onPlan: (questions) => {
             setResearch((prev) => ({
               ...prev,
-              currentIndex: index || prev.currentIndex,
-              currentQuestion: question || prev.currentQuestion,
-              totalQuestions: total || prev.totalQuestions,
+              phase: "researching",
+              questions,
+              totalQuestions: questions.length,
+              currentIndex: 0,
+              currentQuestion: questions[0] || "",
             }));
-          } else if (step === "compiling") {
-            setResearch((prev) => ({ ...prev, phase: "compiling" }));
-          }
-        },
-        onDone: (docId, title, wordCount, questionCount) => {
-          setResearch((prev) => ({
-            ...prev,
-            phase: "done",
-            docId,
-            docTitle: title,
-            wordCount,
-            questionCount,
-            elapsedMs: Date.now() - researchStartRef.current,
-          }));
-        },
-        onError: (_message) => {
-          // Fall back to simulation
-          if (!usedRealBackend) simulateResearch(trimmedTopic);
-        },
-      });
-    } catch (_err) {
-      // Fall back to simulation
-      if (!usedRealBackend) simulateResearch(trimmedTopic);
-    }
-  }
-
-  // Simulation fallback for research (when backend unreachable)
-  async function simulateResearch(topic: string) {
-    const mockQuestions = [
-      `Tổng quan thị trường và xu hướng: ${topic.slice(0, 50)}`,
-      `Phân tích đối thủ cạnh tranh chính trong lĩnh vực ${topic.slice(0, 30)}`,
-      `Cơ hội và thách thức từ ${topic.slice(0, 40)}`,
-      `Đánh giá rủi ro và chiến lược giảm thiểu`,
-      `Dự báo và khuyến nghị cho ${topic.slice(0, 35)}`,
-      `Phân tích chuỗi cung ứng và vận hành`,
-      `Xu hướng công nghệ và đổi mới sáng tạo`,
-      `Phân tích tài chính và đầu tư`,
-    ];
-
-    // Stage 1: Planning
-    setResearch((prev) => ({
-      ...prev,
-      phase: "planning",
-    }));
-
-    // Try to create a real document in Studio via API
-    const reportTitle = `Nghiên cứu: ${topic.slice(0, 80)}`;
-    const reportContent = `# ${reportTitle}\n\n> Báo cáo nghiên cứu tự động | ${new Date().toLocaleDateString("vi-VN")}\n\n## Tóm tắt\n\nBáo cáo này phân tích chuyên sâu về chủ đề "${topic}" với ${mockQuestions.length} câu hỏi nghiên cứu.\n\n## Nội dung nghiên cứu\n\n${mockQuestions.map((q, i) => `### ${i + 1}. ${q}\n\nĐang chờ backend Agno xử lý để có phân tích chi tiết. Hiện tại đây là bản nháp từ simulation mode.\n`).join("\n")}\n\n## Kết luận\n\nBáo cáo sẽ được cập nhật khi backend Agno xử lý xong pipeline nghiên cứu đầy đủ.`;
-
-    let realDocId: string | null = null;
-    try {
-      const doc = await createDocument({
-        title: reportTitle,
-        content: reportContent,
-      });
-      realDocId = doc.id;
-    } catch {
-      // API failed, use generated UUID
-    }
-
-    setTimeout(() => {
-      setResearch((prev) => ({
-        ...prev,
-        phase: "researching",
-        questions: mockQuestions,
-        totalQuestions: mockQuestions.length,
-        currentIndex: 0,
-        currentQuestion: mockQuestions[0],
-      }));
-
-      // Stage 2: Simulate researching each question
-      let qIndex = 0;
-      const researchInterval = setInterval(() => {
-        qIndex++;
-        if (qIndex < mockQuestions.length) {
-          setResearch((prev) => ({
-            ...prev,
-            currentIndex: qIndex,
-            currentQuestion: mockQuestions[qIndex],
-            elapsedMs: Date.now() - researchStartRef.current,
-          }));
-        } else {
-          clearInterval(researchInterval);
-
-          // Stage 3: Compiling
-          setResearch((prev) => ({ ...prev, phase: "compiling" }));
-
-          setTimeout(() => {
-            // Stage 4: Done
-            const wordCount = 1500 + Math.floor(Math.random() * 2000);
+          },
+          onProgress: (step, question, index, total) => {
+            if (step === "researching") {
+              setResearch((prev) => ({
+                ...prev,
+                currentIndex: index || prev.currentIndex,
+                currentQuestion: question || prev.currentQuestion,
+                totalQuestions: total || prev.totalQuestions,
+              }));
+            } else if (step === "compiling") {
+              setResearch((prev) => ({ ...prev, phase: "compiling" }));
+            } else if (step === "heartbeat") {
+              // Update elapsed time
+              setResearch((prev) => ({
+                ...prev,
+                elapsedMs: Date.now() - researchStartRef.current,
+              }));
+            } else if (step === "warning") {
+              setResearch((prev) => ({
+                ...prev,
+                warningMessage: question || "",
+              }));
+            }
+          },
+          onDone: (docId, title, wordCount, questionCount) => {
             setResearch((prev) => ({
               ...prev,
               phase: "done",
-              docId: realDocId || crypto.randomUUID(),
-              docTitle: reportTitle,
+              docId,
+              docTitle: title,
               wordCount,
-              questionCount: mockQuestions.length,
+              questionCount,
               elapsedMs: Date.now() - researchStartRef.current,
             }));
-          }, 1500);
-        }
-      }, 600);
-    }, 800);
+            // Add research result as chat messages
+            const userMsg: UIMessage = {
+              id: crypto.randomUUID(),
+              role: "user",
+              content: `🔬 Nghiên cứu sâu: ${title}`,
+            };
+            const assistantMsg: UIMessage = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: `**📄 ${title}**\n\n> Báo cáo nghiên cứu đã được tạo với **${questionCount}** câu hỏi, **${wordCount.toLocaleString()}** từ.\n>\n> 📂 Đã lưu vào **[Studio →](/studio)** để xem chi tiết, chỉnh sửa và compile thành bộ nhớ.`,
+              reasoningMode: "deep",
+              trace: [
+                {
+                  step: 1,
+                  agent: "Deep Research",
+                  status: "done",
+                  duration_ms: research.elapsedMs || 0,
+                  result: `${questionCount} câu hỏi · ${wordCount.toLocaleString()} từ · DeepSeek V4 Pro`,
+                },
+              ],
+            };
+            setMessages((prev) => [...prev, userMsg, assistantMsg]);
+          },
+          onError: (message) => {
+            setResearch((prev) => ({
+              ...prev,
+              phase: "error",
+              errorMessage: message,
+            }));
+          },
+        },
+        controller.signal,
+      );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        closeResearch();
+        return;
+      }
+      setResearch((prev) => ({
+        ...prev,
+        phase: "error",
+        errorMessage: err instanceof Error ? err.message : "Lỗi nghiên cứu",
+      }));
+    } finally {
+      researchAbortRef.current = null;
+    }
+  }
+
+  function stopResearch() {
+    researchAbortRef.current?.abort();
+    closeResearch();
   }
 
   function closeResearch() {
@@ -570,12 +592,29 @@ export default function Chat() {
     }, 30);
   };
 
+  async function handleStartResearch(topic: string) {
+    try {
+      const { job_id, session_id } = await startResearchV2(topic);
+      setResearchJobId(job_id);
+      if (session_id) {
+        setSessions((prev) => [
+          { id: session_id, title: topic.slice(0, 40), time: "bây giờ" },
+          ...prev,
+        ]);
+        setActiveSessionId(session_id);
+        setMessages([]);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   // Handle keypress
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (researchArmed && input.trim()) {
-        startResearch(input);
+        handleStartResearch(input);
         setInput("");
         setResearchArmed(false);
       } else {
@@ -584,37 +623,36 @@ export default function Chat() {
     }
   };
 
-  // Context panel data
-  const activeSkills = [
-    { name: "Tìm kiếm Web", status: "active" as const, stat: "4×" },
-    { name: "Truy xuất Bộ nhớ", status: "active" as const, stat: "7 facts" },
-    { name: "Phân tích Cạnh tranh", status: "used" as const, stat: "1×" },
-    { name: "Tạo Báo cáo", status: "off" as const, stat: "—" },
-  ];
+  // Context panel data — loaded from API or empty
+  const [activeSkills, setActiveSkills] = useState<
+    Array<{ name: string; status: "active" | "used" | "off"; stat: string }>
+  >([]);
+  const [contextMemories, setContextMemories] = useState<MemoryItem[]>([]);
 
-  const contextMemories: MemoryItem[] = [
-    {
-      id: "cm1",
-      content: "SF Express mở rộng cửa khẩu phụ từ tháng 5/2026",
-      status: "canonical",
-      source: "chat",
-      created_at: "",
-    },
-    {
-      id: "cm2",
-      content: "Thông quan nội bộ trung bình 4.2h/lô hàng",
-      status: "canonical",
-      source: "chat",
-      created_at: "",
-    },
-    {
-      id: "cm3",
-      content: "Viettel Post thử nghiệm AI customs tại Lạng Sơn",
-      status: "pending",
-      source: "capture",
-      created_at: "",
-    },
-  ];
+  // Load context panel data when session changes
+  useEffect(() => {
+    // Load skills
+    import("../lib/api").then(({ getSkills }) => {
+      getSkills()
+        .then((data) => {
+          setActiveSkills(
+            data.map((s) => ({
+              name: s.description || s.name,
+              status: s.enabled ? ("active" as const) : ("off" as const),
+              stat: s.call_count_session ? `${s.call_count_session}×` : "—",
+            })),
+          );
+        })
+        .catch(() => setActiveSkills([]));
+    });
+
+    // Load context memories (canonical, recent)
+    import("../lib/api").then(({ getMemories }) => {
+      getMemories({ status: "canonical", limit: 3 })
+        .then((data) => setContextMemories(data))
+        .catch(() => setContextMemories([]));
+    });
+  }, [activeSessionId]);
 
   // ─── Auth screen ─────────────────────────────────
   if (!authed) {
@@ -783,70 +821,91 @@ export default function Chat() {
             <AgentNetwork />
           </div>
           <div className="flex-1 overflow-y-auto py-[5px]">
-            <div className="px-[14px] pt-[7px] pb-[3px] font-mono text-[8px] uppercase tracking-[.12em] text-[#d4a05a] opacity-55">
-              Hôm nay
+            <div className="px-[14px] pt-[7px] pb-[3px] flex items-center justify-between">
+              <span className="font-mono text-[8px] uppercase tracking-[.12em] text-[#d4a05a] opacity-55">
+                Phiên chat
+              </span>
+              <button
+                onClick={handleNewSession}
+                title="Tạo phiên mới"
+                className="w-5 h-5 rounded-[3px] flex items-center justify-center cursor-pointer bg-transparent border border-[rgba(255,255,255,0.09)] text-[#52586a] hover:text-[#dde2ec] hover:border-[rgba(255,255,255,0.15)] transition-all text-[11px]"
+              >
+                +
+              </button>
             </div>
-            {DEMO_SESSIONS.slice(0, 3).map((s) => (
+            {sessions.map((s) => (
               <div
                 key={s.id}
                 onClick={() => setActiveSessionId(s.id)}
-                className={`px-[14px] py-1.5 cursor-pointer border-l-2 transition-all ${
+                className={`group/session px-[14px] py-1.5 cursor-pointer border-l-2 transition-all ${
                   activeSessionId === s.id
                     ? "bg-[rgba(0,200,164,0.13)] border-l-[#00c8a4]"
                     : "border-l-transparent hover:bg-[rgba(0,200,164,0.06)] hover:border-l-[rgba(0,200,164,0.25)]"
                 }`}
               >
-                <div className="text-[11.5px] text-[#dde2ec] whitespace-nowrap overflow-hidden text-ellipsis">
-                  {s.title}
-                </div>
-                <div className="flex gap-[5px] items-center mt-0.5">
-                  <span className="font-mono text-[9px] text-[#52586a]">
-                    {s.time}
-                  </span>
-                  <span
-                    className={`text-[9px] px-[5px] py-px rounded ${
-                      s.tag === "strategy"
-                        ? "bg-[rgba(139,114,240,0.08)] text-[#a48df5] border border-[rgba(139,114,240,0.2)]"
-                        : s.tag === "finance"
-                          ? "bg-[rgba(0,200,164,0.06)] text-[#40d4b8] border border-[rgba(0,200,164,0.2)]"
-                          : "bg-[rgba(212,160,90,0.08)] text-[#d4a05a] border border-[rgba(212,160,90,0.2)]"
-                    }`}
-                  >
-                    {s.tag}
-                  </span>
-                </div>
-              </div>
-            ))}
-            <div className="px-[14px] pt-[7px] pb-[3px] font-mono text-[8px] uppercase tracking-[.12em] text-[#d4a05a] opacity-55">
-              Hôm qua
-            </div>
-            {DEMO_SESSIONS.slice(3).map((s) => (
-              <div
-                key={s.id}
-                onClick={() => setActiveSessionId(s.id)}
-                className={`px-[14px] py-1.5 cursor-pointer border-l-2 transition-all hover:bg-[rgba(0,200,164,0.06)] ${
-                  activeSessionId === s.id
-                    ? "bg-[rgba(0,200,164,0.13)] border-l-[#00c8a4]"
-                    : "border-l-transparent hover:border-l-[rgba(0,200,164,0.25)]"
-                }`}
-              >
-                <div className="text-[11.5px] text-[#dde2ec] whitespace-nowrap overflow-hidden text-ellipsis">
-                  {s.title}
-                </div>
-                <div className="flex gap-[5px] items-center mt-0.5">
-                  <span className="font-mono text-[9px] text-[#52586a]">
-                    {s.time}
-                  </span>
-                  <span
-                    className={`text-[9px] px-[5px] py-px rounded ${
-                      s.tag === "strategy"
-                        ? "bg-[rgba(139,114,240,0.08)] text-[#a48df5] border border-[rgba(139,114,240,0.2)]"
-                        : "bg-[rgba(0,200,164,0.06)] text-[#40d4b8] border border-[rgba(0,200,164,0.2)]"
-                    }`}
-                  >
-                    {s.tag}
-                  </span>
-                </div>
+                {editingSessionId === s.id ? (
+                  <input
+                    value={editingSessionTitle}
+                    onChange={(e) => setEditingSessionTitle(e.target.value)}
+                    onBlur={() => handleRenameSession(s.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRenameSession(s.id);
+                      if (e.key === "Escape") {
+                        setEditingSessionId(null);
+                        setEditingSessionTitle("");
+                      }
+                    }}
+                    autoFocus
+                    className="w-full bg-[#070910] border border-[rgba(255,255,255,0.09)] rounded-[4px] px-2 py-0.5 text-[11.5px] text-[#dde2ec] outline-none"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11.5px] text-[#dde2ec] whitespace-nowrap overflow-hidden text-ellipsis flex-1">
+                        {s.title}
+                      </div>
+                      <div className="flex gap-0.5 opacity-0 group-hover/session:opacity-100 transition-opacity ml-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingSessionId(s.id);
+                            setEditingSessionTitle(s.title);
+                          }}
+                          title="Đổi tên"
+                          className="w-[18px] h-[18px] rounded-[3px] flex items-center justify-center cursor-pointer bg-transparent border-none text-[#52586a] hover:text-[#dde2ec] text-[10px]"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteSession(s.id, e)}
+                          title="Xóa"
+                          className="w-[18px] h-[18px] rounded-[3px] flex items-center justify-center cursor-pointer bg-transparent border-none text-[#52586a] hover:text-[#e06868] text-[10px]"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex gap-[5px] items-center mt-0.5">
+                      <span className="font-mono text-[9px] text-[#52586a]">
+                        {s.time}
+                      </span>
+                      {s.tag && (
+                        <span
+                          className={`text-[9px] px-[5px] py-px rounded ${
+                            s.tag === "strategy"
+                              ? "bg-[rgba(139,114,240,0.08)] text-[#a48df5] border border-[rgba(139,114,240,0.2)]"
+                              : s.tag === "finance"
+                                ? "bg-[rgba(0,200,164,0.06)] text-[#40d4b8] border border-[rgba(0,200,164,0.2)]"
+                                : "bg-[rgba(212,160,90,0.08)] text-[#d4a05a] border border-[rgba(212,160,90,0.2)]"
+                          }`}
+                        >
+                          {s.tag}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -975,6 +1034,40 @@ export default function Chat() {
                 />
               </div>
             )}
+
+            {/* Research V2 panel */}
+            {researchJobId && (
+              <div className="self-start w-full">
+                <ResearchPanel
+                  jobId={researchJobId}
+                  onClose={() => setResearchJobId(null)}
+                  onDone={(title, content, sectionCount) => {
+                    // Add research result as chat messages with thinking trace
+                    const userMsg: UIMessage = {
+                      id: crypto.randomUUID(),
+                      role: "user",
+                      content: `🔬 Nghiên cứu sâu: ${title}`,
+                    };
+                    const assistantMsg: UIMessage = {
+                      id: crypto.randomUUID(),
+                      role: "assistant",
+                      content,
+                      reasoningMode: "deep",
+                      trace: [
+                        {
+                          step: 1,
+                          agent: "Deep Research",
+                          status: "done",
+                          duration_ms: 0,
+                          result: `${sectionCount} sections · đã lưu vào Studio`,
+                        },
+                      ],
+                    };
+                    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           {/* ─── Input area ──────────────────────────── */}
@@ -1051,7 +1144,11 @@ export default function Chat() {
               <button
                 onClick={() => {
                   if (input.trim()) {
-                    startResearch(input);
+                    startResearchV2(input)
+                      .then(({ job_id }) => {
+                        setResearchJobId(job_id);
+                      })
+                      .catch(() => {});
                     setInput("");
                     setResearchArmed(false);
                   } else {
@@ -1131,19 +1228,31 @@ export default function Chat() {
               <SendButton
                 onClick={() => {
                   if (researchArmed && input.trim()) {
-                    startResearch(input);
+                    handleStartResearch(input);
                     setInput("");
                     setResearchArmed(false);
                   } else {
                     handleSend();
                   }
                 }}
-                loading={streaming}
+                loading={
+                  streaming ||
+                  research.phase === "planning" ||
+                  research.phase === "researching" ||
+                  research.phase === "compiling"
+                }
                 active={
                   streaming ||
                   (research.phase !== "idle" &&
                     research.phase !== "done" &&
                     research.phase !== "error")
+                }
+                onStop={
+                  research.phase === "planning" ||
+                  research.phase === "researching" ||
+                  research.phase === "compiling"
+                    ? stopResearch
+                    : undefined
                 }
               />
             </div>
@@ -1177,6 +1286,16 @@ export default function Chat() {
           />
         </aside>
       </div>
+
+      {/* Delete session confirm modal */}
+      <ConfirmModal
+        open={deleteTargetId !== null}
+        title="Xóa phiên chat"
+        message="Bạn có chắc muốn xóa cuộc trò chuyện này? Hành động này không thể hoàn tác."
+        confirmLabel="Xóa"
+        onConfirm={confirmDeleteSession}
+        onCancel={() => setDeleteTargetId(null)}
+      />
     </div>
   );
 }

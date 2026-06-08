@@ -159,6 +159,7 @@ export interface ResearchController {
 export async function streamResearch(
   topic: string,
   callbacks: ResearchController,
+  signal?: AbortSignal,
 ): Promise<void> {
   const token = getToken();
 
@@ -169,6 +170,7 @@ export async function streamResearch(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ topic }),
+    signal,
   });
 
   if (!res.ok) {
@@ -227,6 +229,19 @@ export async function streamResearch(
             case "error":
               callbacks.onError(event.message);
               break;
+            case "heartbeat":
+              // Update elapsed time silently
+              callbacks.onProgress(
+                "heartbeat",
+                undefined,
+                undefined,
+                undefined,
+              );
+              break;
+            case "warning":
+              // Show warning to user
+              callbacks.onProgress("warning", event.message);
+              break;
           }
         } catch {
           // Skip unparseable lines
@@ -234,6 +249,9 @@ export async function streamResearch(
       }
     }
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return; // User stopped — no error
+    }
     callbacks.onError(
       err instanceof Error ? err.message : "Lỗi stream nghiên cứu",
     );

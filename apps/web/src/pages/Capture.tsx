@@ -21,41 +21,8 @@ export default function Capture() {
       const data = await getCaptures();
       setItems(data);
     } catch {
-      // Demo data
-      setItems([
-        {
-          id: "c1",
-          user_id: "u1",
-          type: "text",
-          content: "Đối tác Hồng Kông yêu cầu tăng SLA lên 99.5% từ Q4",
-          status: "extracted",
-          extracted_facts: [
-            { fact: "Đối tác HK yêu cầu SLA 99.5%", confidence: 0.92 },
-            { fact: "Thời hạn áp dụng: Q4/2026", confidence: 0.88 },
-          ],
-          created_at: "2026-06-07T10:00:00Z",
-        },
-        {
-          id: "c2",
-          user_id: "u1",
-          type: "link",
-          url: "https://example.com/logistics-report",
-          status: "processing",
-          created_at: "2026-06-07T09:30:00Z",
-        },
-        {
-          id: "c3",
-          user_id: "u1",
-          type: "text",
-          content: "Cuộc họp với đối tác Nhật ngày 15/7 về mở rộng kho bãi",
-          status: "committed",
-          extracted_facts: [
-            { fact: "Họp đối tác Nhật 15/7/2026", confidence: 0.95 },
-            { fact: "Chủ đề: mở rộng kho bãi", confidence: 0.90 },
-          ],
-          created_at: "2026-06-06T08:00:00Z",
-        },
-      ]);
+      setMessage("Không thể tải dữ liệu capture");
+      setItems([]);
     }
     setLoading(false);
   }
@@ -103,11 +70,15 @@ export default function Capture() {
     try {
       await commitCapture(id);
       setItems((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, status: "committed" as const } : item)),
+        prev.map((item) =>
+          item.id === id ? { ...item, status: "committed" as const } : item,
+        ),
       );
     } catch {
       setItems((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, status: "committed" as const } : item)),
+        prev.map((item) =>
+          item.id === id ? { ...item, status: "committed" as const } : item,
+        ),
       );
     }
   }
@@ -115,13 +86,25 @@ export default function Capture() {
   function getStatusLabel(status: string): { text: string; cls: string } {
     switch (status) {
       case "processing":
-        return { text: "đang xử lý", cls: "bg-[rgba(212,160,90,0.08)] text-[#d4a05a] border-[rgba(212,160,90,0.2)]" };
+        return {
+          text: "đang xử lý",
+          cls: "bg-[rgba(212,160,90,0.08)] text-[#d4a05a] border-[rgba(212,160,90,0.2)]",
+        };
       case "extracted":
-        return { text: "đã trích xuất", cls: "bg-[rgba(139,114,240,0.08)] text-[#8b72f0] border-[rgba(139,114,240,0.2)]" };
+        return {
+          text: "đã trích xuất",
+          cls: "bg-[rgba(139,114,240,0.08)] text-[#8b72f0] border-[rgba(139,114,240,0.2)]",
+        };
       case "committed":
-        return { text: "đã lưu", cls: "bg-[rgba(0,200,164,0.06)] text-[#00c8a4] border-[rgba(0,200,164,0.2)]" };
+        return {
+          text: "đã lưu",
+          cls: "bg-[rgba(0,200,164,0.06)] text-[#00c8a4] border-[rgba(0,200,164,0.2)]",
+        };
       case "failed":
-        return { text: "lỗi", cls: "bg-[rgba(224,104,104,0.09)] text-[#e06868] border-[rgba(224,104,104,0.2)]" };
+        return {
+          text: "lỗi",
+          cls: "bg-[rgba(224,104,104,0.09)] text-[#e06868] border-[rgba(224,104,104,0.2)]",
+        };
       default:
         return { text: status, cls: "" };
     }
@@ -132,14 +115,22 @@ export default function Capture() {
       {/* Topbar */}
       <header className="h-[46px] bg-[#0c0f18] border-b border-[rgba(255,255,255,0.05)] flex items-center px-4 gap-[10px] flex-shrink-0">
         <div className="flex items-center gap-2">
-          <span className="font-display text-[26px] font-semibold text-[#00c8a4] leading-none tracking-[-0.03em]">A</span>
+          <span className="font-display text-[26px] font-semibold text-[#00c8a4] leading-none tracking-[-0.03em]">
+            A
+          </span>
           <div className="flex flex-col leading-none gap-0.5">
-            <span className="font-display text-[13px] font-medium text-[#dde2ec] tracking-[0.05em]">Ajino</span>
-            <span className="font-mono text-[8px] text-[#52586a] tracking-[0.12em]">v5 · Capture</span>
+            <span className="font-display text-[13px] font-medium text-[#dde2ec] tracking-[0.05em]">
+              Ajino
+            </span>
+            <span className="font-mono text-[8px] text-[#52586a] tracking-[0.12em]">
+              v5 · Capture
+            </span>
           </div>
         </div>
         <div className="flex-1" />
-        <button className="w-[30px] h-[30px] rounded-[7px] border border-transparent bg-transparent text-[#52586a] flex items-center justify-center cursor-pointer transition-all hover:bg-[#12161f] hover:border-[rgba(255,255,255,0.05)] hover:text-[#dde2ec]">←</button>
+        <button className="w-[30px] h-[30px] rounded-[7px] border border-transparent bg-transparent text-[#52586a] flex items-center justify-center cursor-pointer transition-all hover:bg-[#12161f] hover:border-[rgba(255,255,255,0.05)] hover:text-[#dde2ec]">
+          ←
+        </button>
       </header>
 
       <div className="flex-1 bg-[#070910] overflow-y-auto p-6">
@@ -147,8 +138,12 @@ export default function Capture() {
           <div className="flex items-center gap-2 mb-6">
             <IconBolt size={28} className="text-[#d4a05a]" />
             <div>
-              <h2 className="font-display text-lg font-semibold text-[#dde2ec]">Capture</h2>
-              <p className="font-mono text-[9px] text-[#52586a] uppercase">Ghi nhận thông tin nhanh</p>
+              <h2 className="font-display text-lg font-semibold text-[#dde2ec]">
+                Capture
+              </h2>
+              <p className="font-mono text-[9px] text-[#52586a] uppercase">
+                Ghi nhận thông tin nhanh
+              </p>
             </div>
           </div>
 
@@ -215,7 +210,9 @@ export default function Capture() {
           </h3>
 
           {loading ? (
-            <div className="text-center text-[#52586a] py-8 font-mono text-xs">Đang tải...</div>
+            <div className="text-center text-[#52586a] py-8 font-mono text-xs">
+              Đang tải...
+            </div>
           ) : items.length === 0 ? (
             <div className="text-center text-[#52586a] py-8 font-mono text-xs">
               Chưa có thông tin nào được ghi nhận
@@ -233,7 +230,9 @@ export default function Capture() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-mono text-[9px] text-[#52586a] uppercase">
-                            {item.type === "link" ? "🔗 liên kết" : "📝 văn bản"}
+                            {item.type === "link"
+                              ? "🔗 liên kết"
+                              : "📝 văn bản"}
                           </span>
                           <span
                             className={`font-mono text-[8px] px-[5px] py-px rounded border ${status.cls}`}
@@ -245,20 +244,31 @@ export default function Capture() {
                           {item.type === "link" ? item.url : item.content}
                         </p>
 
-                        {item.extracted_facts && item.extracted_facts.length > 0 && (
-                          <div className="mt-2 flex flex-col gap-1">
-                            <span className="font-mono text-[9px] text-[#8b72f0] uppercase">Sự kiện trích xuất:</span>
-                            {item.extracted_facts.map((fact, fi) => (
-                              <div key={fi} className="flex items-center gap-2">
-                                <IconCheck size={12} className="text-[#00c8a4]" />
-                                <span className="text-[11px] text-[#52586a]">{fact.fact}</span>
-                                <span className="font-mono text-[9px] text-[rgba(255,255,255,0.15)]">
-                                  {(fact.confidence * 100).toFixed(0)}%
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        {item.extracted_facts &&
+                          item.extracted_facts.length > 0 && (
+                            <div className="mt-2 flex flex-col gap-1">
+                              <span className="font-mono text-[9px] text-[#8b72f0] uppercase">
+                                Sự kiện trích xuất:
+                              </span>
+                              {item.extracted_facts.map((fact, fi) => (
+                                <div
+                                  key={fi}
+                                  className="flex items-center gap-2"
+                                >
+                                  <IconCheck
+                                    size={12}
+                                    className="text-[#00c8a4]"
+                                  />
+                                  <span className="text-[11px] text-[#52586a]">
+                                    {fact.fact}
+                                  </span>
+                                  <span className="font-mono text-[9px] text-[rgba(255,255,255,0.15)]">
+                                    {(fact.confidence * 100).toFixed(0)}%
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
                         {item.status === "extracted" && (
                           <button

@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS studio_documents (
   compile_status TEXT NOT NULL DEFAULT 'draft'
                CHECK (compile_status IN ('draft','compiling','compiled','failed')),
   memory_ids   UUID[] DEFAULT '{}',  -- memory rows created from this doc
+  deleted_at   TIMESTAMPTZ,            -- soft delete
+  metadata     JSONB NOT NULL DEFAULT '{}', -- source_type, research_job_id, word_count, compile_error
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -130,3 +132,14 @@ CREATE TABLE IF NOT EXISTS reminders (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders (remind_at) WHERE notified_at IS NULL;
+
+-- ─── user_behavior_patterns ───────────────────────────
+CREATE TABLE IF NOT EXISTS user_behavior_patterns (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             UUID NOT NULL REFERENCES users(id) UNIQUE,
+  open_log            JSONB NOT NULL DEFAULT '[]',
+  dominant_mode       TEXT,
+  pattern_confidence  FLOAT DEFAULT 0,
+  last_calculated_at  TIMESTAMPTZ,
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);

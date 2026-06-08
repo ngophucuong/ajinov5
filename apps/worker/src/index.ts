@@ -13,7 +13,7 @@ const CONFIG = {
   OTP_TTL: 300, // 5 minutes
   RATE_LIMIT_WINDOW: 60, // 1 minute window
   RATE_LIMIT_MAX: 100, // max requests per window
-  TUNNEL_BASE: "http://72.60.210.110:8000", // Worker on Edge → VPS Agno (direct, tunnel WIP)
+  TUNNEL_BASE: "https://api.ajinov5.cuong.ngo", // Worker on Edge → Tunnel → VPS Agno
 };
 
 // ─── BINDINGS TYPE ─────────────────────────────────────
@@ -376,6 +376,16 @@ app.all("/api/memory/*", (c: Context<{ Bindings: Bindings }>) => {
   return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
 });
 
+// User API proxy (adaptive mode, etc.)
+app.all("/api/user/*", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+});
+
+// Ops API proxy (schedule, etc.)
+app.all("/api/ops/*", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+});
+
 // Capture API proxy
 app.all("/api/capture/*", (c: Context<{ Bindings: Bindings }>) => {
   return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
@@ -391,9 +401,18 @@ app.all("/api/console/*", (c: Context<{ Bindings: Bindings }>) => {
   return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
 });
 
-// Research API proxy (Deep Research mode)
+// Research API proxy (Deep Research V2 — async job, with user_id injection)
 app.all("/api/research/*", (c: Context<{ Bindings: Bindings }>) => {
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+  const payload = c.get("jwtPayload") as Record<string, unknown> | undefined;
+  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""), {
+    "X-User-Id": String(payload?.sub || ""),
+    "X-Telegram-Id": String(payload?.telegram_id || ""),
+  });
+});
+
+// Research API proxy (direct, unauthenticated — for polling status)
+app.all("/research/*", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path);
 });
 
 // Admin API proxy (via /api prefix)
@@ -504,6 +523,22 @@ app.delete(
 
 // ─── FRONTEND (served via [assets] in wrangler.toml) ────
 // Serve React SPA for all frontend routes
+
+// Telegram Mini App — clean URL without .html
+app.get("/miniapp", async (c: Context<{ Bindings: Bindings }>) => {
+  // Fetch the static file from our own assets
+  const url = new URL(c.req.url);
+  const miniappUrl = `${url.origin}/miniapp.html`;
+  const res = await fetch(miniappUrl);
+  if (res.ok) {
+    return new Response(res.body, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+  return c.notFound();
+});
+
+// Serve React SPA for all frontend routes
 // All static files (JS, CSS, images) are served automatically via [assets]
 // This notFound handler serves index.html for SPA client-side routing
 app.notFound(async (c: Context<{ Bindings: Bindings }>) => {
@@ -516,8 +551,8 @@ app.notFound(async (c: Context<{ Bindings: Bindings }>) => {
   <title>Ajino v5</title>
   <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600&family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script type="module" crossorigin src="/assets/index-24AhfoVi.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BbhOUUwD.css">
+  <script type="module" crossorigin src="/assets/index-BjoiXto4.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DLUgSoR5.css">
 </head>
 <body>
   <div id="root"></div>

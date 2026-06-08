@@ -9,6 +9,7 @@ import type {
   SkillStatus,
   AuditLogEntry,
   ReasoningMode,
+  ResearchJobStatus,
 } from "./types";
 import { getToken } from "./auth";
 
@@ -76,6 +77,45 @@ export async function sendMessage(
       content,
       reasoning_mode: reasoningMode,
     },
+  );
+}
+
+export async function createSession(
+  title?: string,
+): Promise<{ id: string; title: string }> {
+  return request<{ id: string; title: string }>("POST", "/api/chat/sessions", {
+    title,
+  });
+}
+
+export async function renameSession(
+  sessionId: string,
+  title: string,
+): Promise<{ id: string; title: string; updated: boolean }> {
+  return request<{ id: string; title: string; updated: boolean }>(
+    "PATCH",
+    `/api/chat/sessions/${sessionId}`,
+    { title },
+  );
+}
+
+export async function deleteSession(sessionId: string): Promise<null> {
+  return request<null>("DELETE", `/api/chat/sessions/${sessionId}`);
+}
+
+export async function getResearchStatus(
+  jobId: string,
+): Promise<ResearchJobStatus> {
+  return request<ResearchJobStatus>("GET", `/research/${jobId}/status`);
+}
+
+export async function startResearchV2(
+  query: string,
+): Promise<{ job_id: string; status: string; session_id?: string }> {
+  return request<{ job_id: string; status: string; session_id?: string }>(
+    "POST",
+    "/api/research/start",
+    { query },
   );
 }
 
@@ -265,4 +305,87 @@ export function getAuditExportUrl(from?: string, to?: string): string {
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
   return `/admin/audit/export?${qs.toString()}`;
+}
+
+// ─── Mini App — Adaptive Mode ──────────────────────────
+import type {
+  AdaptiveModeResponse,
+  MemorySearchResult,
+  PendingMemorySummary,
+  ContextMemoryCard,
+} from "./types";
+
+export async function getAdaptiveMode(
+  telegramId: string,
+): Promise<AdaptiveModeResponse> {
+  return request<AdaptiveModeResponse>(
+    "GET",
+    `/api/user/adaptive-mode?telegram_id=${encodeURIComponent(telegramId)}`,
+  );
+}
+
+export async function logMiniAppOpen(data: {
+  telegram_id: string;
+  mode_shown: string;
+  vn_hour: number;
+  had_meeting_soon: boolean;
+  duration_seconds: number;
+}): Promise<{ recorded: boolean }> {
+  return request("POST", "/api/user/adaptive-mode/open-log", data);
+}
+
+export async function getTelegramSessionId(
+  telegramId: string,
+): Promise<{ session_id: string }> {
+  return request<{ session_id: string }>(
+    "GET",
+    `/api/chat/sessions/telegram?telegram_id=${encodeURIComponent(telegramId)}`,
+  );
+}
+
+export async function searchMemories(
+  query: string,
+  topK: number = 3,
+): Promise<MemorySearchResult[]> {
+  return request<MemorySearchResult[]>(
+    "GET",
+    `/api/memory/search?q=${encodeURIComponent(query)}&top_k=${topK}`,
+  );
+}
+
+export async function getMemorySummary(): Promise<PendingMemorySummary> {
+  return request<PendingMemorySummary>("GET", "/api/memory/summary");
+}
+
+export async function getPendingMemoriesPaginated(
+  offset: number = 0,
+  limit: number = 1,
+): Promise<MemoryItem[]> {
+  return getMemories({ status: "pending", limit, offset });
+}
+
+// ─── Mini App — Schedule ───────────────────────────────
+import type { ScheduleItem } from "./types";
+
+export async function getSchedule(date?: string): Promise<{
+  items: ScheduleItem[];
+  next: {
+    id: string;
+    title: string;
+    start_time: string;
+    duration_min: number;
+    minutes_until: number;
+  } | null;
+}> {
+  const qs = new URLSearchParams();
+  if (date) qs.set("date", date);
+  qs.set("next", "true");
+  return request("GET", `/api/ops/schedule?${qs.toString()}`);
+}
+
+export async function getTodaySchedule(): Promise<{
+  items: ScheduleItem[];
+  next: null;
+}> {
+  return request("GET", "/api/ops/schedule?date=today");
 }

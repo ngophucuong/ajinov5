@@ -98,6 +98,254 @@ async def get_telegram_context(telegram_id: str) -> list[dict]:
     return [dict(m) for m in reversed(messages)]
 
 
+# ─── Adaptive Mode Logic ─────────────────────────────────
+
+# Vietnamese timezone offset
+VN_OFFSET_HOURS = 7
+
+# Keywords that indicate complex analytical queries
+ANALYTICAL_KEYWORDS = {
+    "phân tích",
+    "so sánh",
+    "đánh giá",
+    "chiến lược",
+    "dự báo",
+    "tại sao",
+    "nguyên nhân",
+    "rủi ro",
+    "cơ hội",
+    "xu hướng",
+    "analyze",
+    "compare",
+    "strategy",
+    "forecast",
+    "why",
+    "risk",
+}
+
+
+async def get_adaptive_mode(telegram_id: str) -> dict:
+    """
+    Determine which mode the Mini App should open in.
+    Priority order: meeting_soon > post_meeting > learned_pattern > morning_routine > default (chat)
+    """
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    vn_hour = (now.hour + VN_OFFSET_HOURS) % 24
+
+    pool = await get_pool()
+
+    # Rule 1 & 2: Schedule-based meeting detection from reminders table
+    # Check if there's a reminder within the next 30 minutes
+    next_reminder = await pool.fetchrow(
+        "SELECT id, content, remind_at FROM reminders "
+        "WHERE telegram_id = $1 AND notified_at IS NULL AND remind_at > $2 "
+        "ORDER BY remind_at ASC LIMIT 1",
+        int(telegram_id),
+        now,
+    )
+
+    if next_reminder:
+        remind_at = next_reminder["remind_at"]
+        minutes_until = (remind_at - now).total_seconds() / 60
+
+        if 0 < minutes_until <= 30:
+            # Rule 1: Within 30 minutes before a meeting -> premeeting
+            return {
+                "mode": "premeeting",
+                "reason": "meeting_soon",
+                "confidence": 1.0,
+                "meeting": {
+                    "title": next_reminder["content"],
+                    "start_time": remind_at.isoformat(),
+                    "duration_min": 30,
+                },
+            }
+
+        if -30 <= minutes_until <= 0:
+            # Rule 2: Within 30 minutes after meeting ended -> capture
+            return {
+                "mode": "capture",
+                "reason": "post_meeting",
+                "confidence": 1.0,
+                "meeting": {
+                    "title": next_reminder["content"],
+                    "start_time": remind_at.isoformat(),
+                    "duration_min": 30,
+                },
+            }
+
+    # Try to get behavior pattern
+    try:
+        user_row = await pool.fetchrow(
+            "SELECT id FROM users WHERE telegram_id = $1",
+            int(telegram_id),
+        )
+        user_uuid = str(user_row["id"]) if user_row else None
+    except Exception:
+        user_uuid = None
+
+    if user_uuid:
+        pattern = await pool.fetchrow(
+            "SELECT dominant_mode, pattern_confidence, open_log "
+            "FROM user_behavior_patterns WHERE user_id = $1",
+            user_uuid,
+        )
+    else:
+        pattern = None
+
+    # Rule 3: Not enough data (< 7 opens) → default chat
+    if (
+        not pattern
+        or not pattern["pattern_confidence"]
+        or pattern["pattern_confidence"] < 0.5
+    ):
+        return {
+            "mode": "chat",
+            "reason": "default",
+            "confidence": 0.0,
+            "meeting": None,
+        }
+
+    open_log = pattern["open_log"] or []
+    if len(open_log) < 7:
+        return {
+            "mode": "chat",
+            "reason": "default",
+            "confidence": 0.0,
+            "meeting": None,
+        }
+
+    # Rule 4: Early morning (6:30–9:00 VN) → briefing
+    if 6 <= vn_hour <= 9:
+        return {
+            "mode": "briefing",
+            "reason": "morning_routine",
+            "confidence": 0.8,
+            "meeting": None,
+        }
+
+    # Rule 5: Learned pattern with high confidence
+    if pattern["dominant_mode"] and (pattern["pattern_confidence"] or 0) >= 0.7:
+        return {
+            "mode": pattern["dominant_mode"],
+            "reason": "learned_pattern",
+            "confidence": pattern["pattern_confidence"],
+            "meeting": None,
+        }
+
+    # Fallback: chat
+    return {
+        "mode": "chat",
+        "reason": "default",
+        "confidence": 0.0,
+        "meeting": None,
+    }
+
+
+async def recalculate_behavior_patterns():
+    """
+    Cron: runs every Sunday at 00:00 UTC.
+    Analyzes open_log data to compute dominant_mode and pattern_confidence per user.
+    """
+    try:
+        pool = await get_pool()
+        users = await pool.fetch("SELECT id FROM users")
+
+        for user in users:
+            user_id = user["id"]
+            row = await pool.fetchrow(
+                "SELECT open_log FROM user_behavior_patterns WHERE user_id = $1",
+                user_id,
+            )
+            if not row or not row["open_log"]:
+                continue
+
+            logs = row["open_log"]
+            if not isinstance(logs, list):
+                logs = json.loads(logs) if isinstance(logs, str) else []
+
+            if len(logs) < 7:
+                continue
+
+            # Calculate dominant opening hour (VN time)
+            hours = [
+                entry.get("vn_hour", 0)
+                for entry in logs
+                if entry.get("vn_hour") is not None
+            ]
+            if not hours:
+                continue
+
+            from collections import Counter
+
+            hour_counts = Counter(hours)
+            dominant_hour = hour_counts.most_common(1)[0][0]
+
+            # Calculate most common mode
+            modes = [
+                entry.get("mode_shown") for entry in logs if entry.get("mode_shown")
+            ]
+            dominant_mode = Counter(modes).most_common(1)[0][0] if modes else None
+
+            # Confidence: ratio of opens within 1 hour of dominant hour
+            confidence = len([h for h in hours if abs(h - dominant_hour) <= 1]) / len(
+                hours
+            )
+
+            await pool.execute(
+                "INSERT INTO user_behavior_patterns (user_id, dominant_mode, pattern_confidence, open_log, last_calculated_at) "
+                "VALUES ($1, $2, $3, $4, now()) "
+                "ON CONFLICT (user_id) DO UPDATE SET "
+                "dominant_mode = EXCLUDED.dominant_mode, "
+                "pattern_confidence = EXCLUDED.pattern_confidence, "
+                "last_calculated_at = EXCLUDED.last_calculated_at, "
+                "updated_at = now()",
+                user_id,
+                dominant_mode,
+                confidence,
+                json.dumps(logs),
+            )
+
+        print(f"Behavior patterns recalculated for {len(users)} users")
+    except Exception as e:
+        print(f"Behavior pattern recalculation error: {e}")
+
+
+async def behavior_pattern_cron_loop():
+    """
+    Background task: recalculate behavior patterns every Sunday at 00:00 UTC.
+    Also runs once on startup to seed initial data if needed.
+    """
+    import time as _time
+    from datetime import datetime, timezone
+
+    while True:
+        try:
+            await recalculate_behavior_patterns()
+        except Exception as e:
+            print(f"Cron error: {e}")
+
+        # Sleep until next Sunday 00:00 UTC
+        now = datetime.now(timezone.utc)
+        days_until_sunday = (6 - now.weekday()) % 7
+        if days_until_sunday == 0 and now.hour == 0:
+            days_until_sunday = 7  # Already Sunday 00:xx, wait for next week
+        next_sunday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        from datetime import timedelta
+
+        next_sunday += timedelta(days=days_until_sunday)
+        if next_sunday <= now:
+            next_sunday += timedelta(days=7)
+
+        sleep_seconds = max(60, (next_sunday - now).total_seconds())
+        print(
+            f"Behavior pattern cron: next run at {next_sunday.isoformat()} (sleep {sleep_seconds:.0f}s)"
+        )
+        await asyncio.sleep(sleep_seconds)
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize DB schema on startup."""
@@ -148,6 +396,10 @@ async def startup():
             except Exception:
                 pass  # Table may not exist yet on first run
         print("Skills seeded")
+
+        # Launch behavior pattern cron (background task, never awaited)
+        asyncio.create_task(behavior_pattern_cron_loop())
+        print("Behavior pattern cron started")
     except Exception as e:
         print(f"Startup warning (DB not ready?): {e}")
 
@@ -188,6 +440,137 @@ async def health():
         "pgvector": pgvector_status,
         "version": "5.0.0",
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# USER & ADAPTIVE MODE ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+
+@app.get("/user/adaptive-mode")
+async def user_adaptive_mode(
+    request: Request,
+    telegram_id: str = Query(None, description="Telegram user ID"),
+):
+    """
+    GET /user/adaptive-mode?telegram_id=...
+    Returns the recommended mode for the Mini App.
+    """
+    # Get telegram_id from query param or X-Telegram-Id header
+    tid = telegram_id or request.headers.get("X-Telegram-Id", "")
+    if not tid:
+        raise HTTPException(status_code=400, detail="Missing telegram_id")
+
+    result = await get_adaptive_mode(tid)
+    return {"data": result, "error": None}
+
+
+@app.post("/user/adaptive-mode/open-log")
+async def user_adaptive_mode_open_log(request: dict):
+    """
+    POST /user/adaptive-mode/open-log
+    Body: { telegram_id: string, mode_shown: string, vn_hour: number, had_meeting_soon: bool, duration_seconds: number }
+    Logs a Mini App open event for behavior pattern learning.
+    """
+    telegram_id = str(request.get("telegram_id", ""))
+    mode_shown = request.get("mode_shown", "chat")
+    vn_hour = request.get("vn_hour", 0)
+    had_meeting_soon = request.get("had_meeting_soon", False)
+    duration_seconds = request.get("duration_seconds", 0)
+
+    if not telegram_id:
+        raise HTTPException(status_code=400, detail="Missing telegram_id")
+
+    pool = await get_pool()
+
+    # Get or create user behavior pattern row
+    user_row = await pool.fetchrow(
+        "SELECT id FROM users WHERE telegram_id = $1",
+        int(telegram_id),
+    )
+    if not user_row:
+        # Create user if not exists (Telegram Mini App first open)
+        user_row = await pool.fetchrow(
+            "INSERT INTO users (telegram_id, role) VALUES ($1, 'ceo') "
+            "ON CONFLICT (telegram_id) DO UPDATE SET name = users.name RETURNING id",
+            int(telegram_id),
+        )
+
+    user_uuid = user_row["id"]
+
+    # Upsert behavior pattern row
+    await pool.execute(
+        "INSERT INTO user_behavior_patterns (user_id, open_log) "
+        "VALUES ($1, '[]'::jsonb) "
+        "ON CONFLICT (user_id) DO NOTHING",
+        user_uuid,
+    )
+
+    # Append to open_log (keep last 90 days of entries)
+    new_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "vn_hour": vn_hour,
+        "mode_shown": mode_shown,
+        "had_meeting_soon": had_meeting_soon,
+        "duration_seconds": duration_seconds,
+    }
+
+    await pool.execute(
+        "UPDATE user_behavior_patterns SET "
+        "open_log = (open_log || $1::jsonb), "
+        "updated_at = now() "
+        "WHERE user_id = $2",
+        json.dumps([new_entry]),
+        user_uuid,
+    )
+
+    # Trim old entries (> 90 days)
+    cutoff = (datetime.now() - __import__("datetime").timedelta(days=90)).isoformat()
+    await pool.execute(
+        "UPDATE user_behavior_patterns SET open_log = ("
+        "  SELECT jsonb_agg(elem) FROM jsonb_array_elements(open_log) AS elem "
+        "  WHERE (elem->>'timestamp') >= $1"
+        ") WHERE user_id = $2",
+        cutoff,
+        user_uuid,
+    )
+
+    # Write audit log
+    try:
+        await pool.execute(
+            "INSERT INTO audit_log (user_id, action, resource_type, payload) "
+            "VALUES ($1, 'miniapp.open', 'user_behavior_patterns', $2)",
+            user_uuid,
+            json.dumps(
+                {
+                    "mode_shown": mode_shown,
+                    "vn_hour": vn_hour,
+                    "had_meeting_soon": had_meeting_soon,
+                }
+            ),
+        )
+    except Exception as e:
+        print(f"Audit log warning: {e}")
+
+    return {"data": {"recorded": True}, "error": None}
+
+
+@app.get("/chat/sessions/telegram")
+async def get_telegram_session(
+    request: Request,
+    telegram_id: str = Query(None),
+):
+    """
+    GET /chat/sessions/telegram?telegram_id=...
+    Returns the Telegram chat session for Mini App context.
+    """
+    tid = telegram_id or request.headers.get("X-Telegram-Id", "")
+    if not tid:
+        raise HTTPException(status_code=400, detail="Missing telegram_id")
+
+    session_id = await get_or_create_telegram_session(tid)
+    # Schedule endpoint is defined below
+    return {"data": {"session_id": session_id}, "error": None}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -437,15 +820,12 @@ async def chat_stream(request: dict):
 @app.get("/chat/sessions")
 async def list_sessions():
     """List chat sessions."""
-    try:
-        pool = await get_pool()
-        rows = await pool.fetch(
-            "SELECT id, title, tags, updated_at FROM chat_sessions "
-            "ORDER BY updated_at DESC LIMIT 20"
-        )
-        return {"data": [dict(r) for r in rows]}
-    except Exception:
-        return {"data": []}
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id, title, tags, updated_at FROM chat_sessions "
+        "ORDER BY updated_at DESC LIMIT 20"
+    )
+    return {"data": [dict(r) for r in rows]}
 
 
 @app.get("/chat/sessions/{session_id}/messages")
@@ -464,9 +844,120 @@ async def get_messages(session_id: str):
         return {"data": []}
 
 
+@app.post("/chat/sessions")
+async def create_empty_session(request: dict):
+    """
+    POST /chat/sessions — Create a new empty chat session.
+    Body: { title?: string, user_id?: string }
+    """
+    title = (request.get("title") or "").strip()[:80]
+    user_id = request.get("user_id")
+
+    pool = await get_pool()
+
+    user_uuid = None
+    if user_id:
+        try:
+            row = await pool.fetchrow(
+                "INSERT INTO users (telegram_id, role) VALUES ($1, 'ceo') "
+                "ON CONFLICT (telegram_id) DO UPDATE SET name = users.name RETURNING id",
+                int(user_id),
+            )
+            user_uuid = row["id"]
+        except Exception:
+            pass
+
+    sid = str(uuid.uuid4())
+    await pool.execute(
+        "INSERT INTO chat_sessions (id, user_id, title) VALUES ($1, $2, $3)",
+        sid,
+        user_uuid,
+        title or "Cuộc trò chuyện mới",
+    )
+
+    return {"data": {"id": sid, "title": title or "Cuộc trò chuyện mới"}}
+
+
+@app.patch("/chat/sessions/{session_id}")
+async def update_session(session_id: str, request: dict):
+    """
+    PATCH /chat/sessions/{id} — Rename a chat session.
+    Body: { title: string }
+    """
+    title = (request.get("title") or "").strip()[:80]
+    if not title:
+        raise HTTPException(status_code=400, detail="Missing title")
+
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE chat_sessions SET title = $1, updated_at = now() WHERE id = $2",
+        title,
+        session_id,
+    )
+    return {"data": {"id": session_id, "title": title, "updated": True}}
+
+
+@app.delete("/chat/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """
+    DELETE /chat/sessions/{id} — Delete a chat session and its messages.
+    """
+    pool = await get_pool()
+    await pool.execute(
+        "DELETE FROM chat_messages WHERE session_id = $1",
+        session_id,
+    )
+    await pool.execute(
+        "DELETE FROM chat_sessions WHERE id = $1",
+        session_id,
+    )
+    return {"data": None}
+
+
 # ═══════════════════════════════════════════════════════════
 # MEMORY ENDPOINTS
 # ═══════════════════════════════════════════════════════════
+
+
+@app.get("/memory/summary")
+async def memory_summary():
+    """
+    GET /memory/summary
+    Returns pending count + breakdown by source for Mini App Briefing mode.
+    """
+    pool = await get_pool()
+
+    try:
+        total_row = await pool.fetchrow(
+            "SELECT COUNT(*) as cnt FROM memory WHERE status = 'pending'"
+        )
+        total = total_row["cnt"] if total_row else 0
+
+        breakdown_rows = await pool.fetch(
+            "SELECT source, COUNT(*) as cnt FROM memory "
+            "WHERE status = 'pending' GROUP BY source"
+        )
+        breakdown = {"chat": 0, "capture": 0, "studio": 0, "manual": 0}
+        for row in breakdown_rows:
+            src = row["source"]
+            if src in breakdown:
+                breakdown[src] = row["cnt"]
+
+        return {
+            "data": {
+                "count": total,
+                "breakdown": breakdown,
+            },
+            "error": None,
+        }
+    except Exception:
+        return {
+            "data": {
+                "count": 0,
+                "breakdown": {"chat": 0, "capture": 0, "studio": 0, "manual": 0},
+            },
+            "error": None,
+        }
 
 
 @app.post("/memory")
@@ -766,10 +1257,10 @@ async def research_stream(request: dict):
     """
     POST /research/stream — Deep Research mode SSE.
     1. LLM generates 10-12 research questions
-    2. Each question: web search + memory retrieval
-    3. LLM compiles structured Markdown report
+    2. Each question: web search + memory retrieval (with 45s timeout)
+    3. LLM compiles structured Markdown report (with 60s timeout)
     4. Report saved to studio_documents
-    SSE events: start → plan → progress (per question) → compiling → done | error
+    SSE events: start → plan → progress → heartbeat → warning → done | error
     """
     topic = (request.get("topic") or request.get("message", "")).strip()
     user_id = request.get("user_id")
@@ -780,6 +1271,22 @@ async def research_stream(request: dict):
     pool = await get_pool()
 
     async def event_stream():
+        import time as time_mod
+
+        start_time = time_mod.time()
+        last_yield = start_time
+
+        async def maybe_heartbeat():
+            nonlocal last_yield
+            now = time_mod.time()
+            elapsed = int(now - start_time)
+            if now - last_yield > 25:
+                yield f"data: {json.dumps({'event': 'heartbeat', 'elapsed': elapsed})}\n\n"
+                last_yield = now
+                # Warning at ~80s
+                if elapsed > 80:
+                    yield f"data: {json.dumps({'event': 'warning', 'elapsed': elapsed, 'message': 'Nghiên cứu đang mất nhiều thời gian hơn dự kiến...'})}\n\n"
+
         yield f"data: {json.dumps({'event': 'start'})}\n\n"
 
         try:
@@ -789,32 +1296,64 @@ async def research_stream(request: dict):
                 research_single_question,
             )
 
-            # Stage 1: Generate research plan
+            # Stage 1: Generate research plan (with 30s timeout)
             yield f"data: {json.dumps({'event': 'progress', 'step': 'planning', 'message': 'Đang lập kế hoạch nghiên cứu...'})}\n\n"
-            questions = await generate_research_plan(topic, LITELLM_URL, LITELLM_MASTER_KEY)
+            try:
+                questions = await asyncio.wait_for(
+                    generate_research_plan(topic, LITELLM_URL, LITELLM_MASTER_KEY),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                yield f"data: {json.dumps({'event': 'error', 'message': 'Timeout khi lập kế hoạch nghiên cứu (>30s)'})}\n\n"
+                return
             yield f"data: {json.dumps({'event': 'plan', 'questions': questions})}\n\n"
+            async for hb in maybe_heartbeat():
+                yield hb
 
-            # Stage 2: Research each question
+            # Stage 2: Research each question (with 45s timeout per question)
             all_findings = []
             for i, question in enumerate(questions):
                 yield f"data: {json.dumps({'event': 'progress', 'step': 'researching', 'question': question, 'index': i + 1, 'total': len(questions)})}\n\n"
-                findings = await research_single_question(
-                    question=question,
-                    serper_key=SERPER_KEY,
-                    db_pool=pool,
-                )
-                all_findings.append(findings)
+                try:
+                    findings = await asyncio.wait_for(
+                        research_single_question(
+                            question=question,
+                            serper_key=SERPER_KEY,
+                            db_pool=pool,
+                        ),
+                        timeout=45.0,
+                    )
+                    all_findings.append(findings)
+                except asyncio.TimeoutError:
+                    all_findings.append(
+                        {
+                            "question": question,
+                            "web": [],
+                            "memory": [],
+                            "timeout": True,
+                        }
+                    )
+                    yield f"data: {json.dumps({'event': 'progress', 'step': 'researching', 'question': question, 'index': i + 1, 'total': len(questions), 'warning': 'Timeout sau 45s, bỏ qua câu hỏi này'})}\n\n"
                 await asyncio.sleep(0.05)
+                async for hb in maybe_heartbeat():
+                    yield hb
 
-            # Stage 3: Compile report
+            # Stage 3: Compile report (with 60s timeout)
             yield f"data: {json.dumps({'event': 'progress', 'step': 'compiling', 'message': 'Đang tổng hợp báo cáo...'})}\n\n"
-            report_content = await compile_research_report(
-                topic=topic,
-                all_findings=all_findings,
-                model="deepseek-pro",
-                litellm_url=LITELLM_URL,
-                litellm_api_key=LITELLM_MASTER_KEY,
-            )
+            try:
+                report_content = await asyncio.wait_for(
+                    compile_research_report(
+                        topic=topic,
+                        all_findings=all_findings,
+                        model="deepseek-pro",
+                        litellm_url=LITELLM_URL,
+                        litellm_api_key=LITELLM_MASTER_KEY,
+                    ),
+                    timeout=60.0,
+                )
+            except asyncio.TimeoutError:
+                yield f"data: {json.dumps({'event': 'error', 'message': 'Timeout khi tổng hợp báo cáo (>60s)'})}\n\n"
+                return
 
             # Stage 4: Save to Studio
             doc_id = str(uuid.uuid4())
@@ -858,7 +1397,8 @@ async def research_stream(request: dict):
                 pass
 
             word_count = len(report_content.split())
-            yield f"data: {json.dumps({'event': 'done', 'doc_id': doc_id, 'title': report_title, 'word_count': word_count, 'question_count': len(questions)})}\n\n"
+            total_elapsed = int(time_mod.time() - start_time)
+            yield f"data: {json.dumps({'event': 'done', 'doc_id': doc_id, 'title': report_title, 'word_count': word_count, 'question_count': len(questions), 'elapsed': total_elapsed})}\n\n"
 
         except Exception as e:
             yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
@@ -872,6 +1412,122 @@ async def research_stream(request: dict):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# DEEP RESEARCH V2 — Async Job Pattern
+# ═══════════════════════════════════════════════════════════
+
+from pydantic import BaseModel, Field
+
+
+class ResearchRequest(BaseModel):
+    query: str = Field(..., min_length=10, max_length=500)
+
+
+@app.post("/research/start")
+async def start_research_v2(body: dict, req: Request):
+    """
+    POST /research/start — Start a deep research job (V2 async pattern).
+    Header: X-Telegram-Id (set by worker from JWT payload)
+    """
+    query = (body.get("query") or body.get("topic", "")).strip()
+    # Use X-Telegram-Id (integer) for user lookup
+    user_id = req.headers.get("X-Telegram-Id", "")
+    if not user_id:
+        user_id = str(body.get("user_id", ""))
+
+    if not query or len(query) < 10:
+        raise HTTPException(
+            status_code=400, detail="Query must be at least 10 characters"
+        )
+
+    from research.job_manager import create_job, run_job
+
+    pool = await get_pool()
+
+    # Create a chat_session for left panel history (user_id optional)
+    session_id = None
+    try:
+        session_id = str(uuid.uuid4())
+        # Get or create user for user_id
+        user_uuid = None
+        if user_id:
+            try:
+                row = await pool.fetchrow(
+                    "SELECT id FROM users WHERE telegram_id = $1",
+                    int(user_id),
+                )
+                if row:
+                    user_uuid = row["id"]
+                else:
+                    row = await pool.fetchrow(
+                        "INSERT INTO users (telegram_id, role) VALUES ($1, 'ceo') RETURNING id",
+                        int(user_id),
+                    )
+                    user_uuid = row["id"]
+            except Exception:
+                pass
+
+        await pool.execute(
+            "INSERT INTO chat_sessions (id, user_id, title) VALUES ($1, $2, $3)",
+            session_id,
+            user_uuid,
+            query[:80],
+        )
+    except Exception as e:
+        print(f"[research] Failed to create chat_session: {e}")
+        session_id = None
+
+    job_id = create_job(str(user_id), query)
+    asyncio.create_task(
+        run_job(
+            job_id,
+            litellm_url=LITELLM_URL,
+            litellm_api_key=LITELLM_MASTER_KEY,
+            serper_key=SERPER_KEY,
+            db_pool=pool,
+        )
+    )
+
+    return {"data": {"job_id": job_id, "status": "queued", "session_id": session_id}}
+
+
+@app.get("/research/{job_id}/status")
+async def get_research_status(job_id: str):
+    """
+    GET /research/{job_id}/status — Poll research job progress.
+    Returns: { job_id, status, progress, current_step, plan_title, sections[], error }
+    """
+    from research.job_manager import get_job
+
+    pool = await get_pool()
+    job = await get_job(job_id, db_pool=pool)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "data": {
+            "job_id": job_id,
+            "status": job["status"],
+            "progress": job["progress"],
+            "current_step": job["current_step"],
+            "plan_title": job["plan"]["title"] if job.get("plan") else None,
+            "sections": [
+                {
+                    "id": s["id"],
+                    "title": s["title"],
+                    "status": s["status"],
+                    "content": s["content"] if s["status"] == "done" else None,
+                }
+                for s in job.get("sections", [])
+            ],
+            "error": job.get("error"),
+            "document_id": job.get("document_id"),
+            "completed_at": job.get("completed_at"),
+        }
+    }
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1053,6 +1709,45 @@ async def create_document(request: Request):
     }
 
 
+@app.put("/studio/documents/{doc_id}")
+async def update_document(doc_id: str, request: dict):
+    """
+    PUT /studio/documents/{id} — Update document title or content.
+    """
+    title = request.get("title")
+    content = request.get("content")
+    if not title and not content:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    pool = await get_pool()
+    if title:
+        await pool.execute(
+            "UPDATE studio_documents SET title = $1, updated_at = now() WHERE id = $2",
+            title[:200],
+            doc_id,
+        )
+    if content:
+        await pool.execute(
+            "UPDATE studio_documents SET content = $1, updated_at = now() WHERE id = $2",
+            content,
+            doc_id,
+        )
+    return {"data": {"id": doc_id, "updated": True}}
+
+
+@app.delete("/studio/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    """
+    DELETE /studio/documents/{id} — Soft delete (set deleted_at).
+    """
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE studio_documents SET deleted_at = now() WHERE id = $1",
+        doc_id,
+    )
+    return {"data": None}
+
+
 @app.post("/studio/documents/{doc_id}/compile")
 async def compile_document(doc_id: str, request: dict):
     """Compile document into memory with smart chunking."""
@@ -1137,15 +1832,35 @@ async def compile_document(doc_id: str, request: dict):
 
 @app.get("/studio/documents")
 async def list_documents():
-    """GET /studio/documents — List all studio documents."""
-    try:
-        pool = await get_pool()
-        rows = await pool.fetch(
-            "SELECT id, title, compile_status, updated_at FROM studio_documents ORDER BY updated_at DESC LIMIT 20"
-        )
-        return {"data": [dict(r) for r in rows]}
-    except Exception:
-        return {"data": []}
+    """GET /studio/documents — List non-deleted studio documents."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id, title, compile_status, updated_at, created_at, r2_key, "
+        "memory_ids, metadata "
+        "FROM studio_documents WHERE deleted_at IS NULL "
+        "ORDER BY updated_at DESC LIMIT 50"
+    )
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["memory_ids_count"] = len(r["memory_ids"]) if r["memory_ids"] else 0
+        result.append(d)
+    return {"data": result}
+
+
+@app.get("/studio/documents/{doc_id}")
+async def get_document(doc_id: str):
+    """GET /studio/documents/{id} — Get full document detail."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT id, title, content, compile_status, memory_ids, "
+        "r2_key, created_at, updated_at, metadata "
+        "FROM studio_documents WHERE id = $1 AND deleted_at IS NULL",
+        doc_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"data": dict(row)}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1599,3 +2314,78 @@ def chunk_by_heading(content: str, levels: list) -> list:
             chunks.insert(0, intro)
 
     return chunks
+
+
+@app.get("/ops/schedule")
+async def ops_schedule(
+    request: Request,
+    date: str = Query(None),
+    next: bool = Query(False),
+):
+    """GET /ops/schedule?date=today&next=true - returns schedule from reminders."""
+    from datetime import date as dt_date
+    from datetime import datetime, timedelta, timezone
+
+    today = dt_date.today()
+    if date and date != "today":
+        try:
+            today = dt_date.fromisoformat(date)
+        except ValueError:
+            pass
+
+    pool = await get_pool()
+    now = datetime.now(timezone.utc)
+
+    if next:
+        row = await pool.fetchrow(
+            "SELECT id, content, remind_at FROM reminders "
+            "WHERE notified_at IS NULL AND remind_at > $1 "
+            "ORDER BY remind_at ASC LIMIT 1",
+            now,
+        )
+        if row:
+            remind_at = row["remind_at"]
+            diff_min = max(0, (remind_at - now).total_seconds() / 60)
+            return {
+                "data": {
+                    "items": [],
+                    "next": {
+                        "id": str(row["id"]),
+                        "title": row["content"],
+                        "start_time": remind_at.isoformat(),
+                        "duration_min": 30,
+                        "minutes_until": round(diff_min),
+                    },
+                },
+                "error": None,
+            }
+        return {"data": {"items": [], "next": None}, "error": None}
+
+    day_start = datetime(
+        today.year, today.month, today.day, 0, 0, 0, tzinfo=timezone.utc
+    )
+    day_end = day_start + timedelta(days=1)
+
+    rows = await pool.fetch(
+        "SELECT id, content, remind_at FROM reminders "
+        "WHERE remind_at >= $1 AND remind_at < $2 AND notified_at IS NULL "
+        "ORDER BY remind_at ASC",
+        day_start,
+        day_end,
+    )
+
+    tz_vn = timezone(timedelta(hours=VN_OFFSET_HOURS))
+    items = []
+    for r in rows:
+        remind_at_vn = r["remind_at"].astimezone(tz_vn)
+        items.append(
+            {
+                "id": str(r["id"]),
+                "title": r["content"],
+                "time": remind_at_vn.strftime("%H:%M"),
+                "duration_min": 30,
+                "tag": "30'",
+            }
+        )
+
+    return {"data": {"items": items, "next": None}, "error": None}
