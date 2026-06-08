@@ -6,14 +6,23 @@ FastAPI app with chat pipeline, health check, SSE streaming, memory endpoints.
 import asyncio
 import json
 import os
+import re
+import uuid
+from datetime import datetime
 
 import asyncpg
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request
+from agents.context_buffer import extract_and_buffer as _extract_and_buffer
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-# ─── Config ─────────────────────────────────────────────
+
+async def _extract_and_buffer_background(telegram_id: str, text: str, db_pool=None):
+    await _extract_and_buffer(telegram_id, text, db_pool=db_pool)
+
+
+# ─── Config ────────────────────────────────────────────────
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://ajinov5:changeme@postgres:5432/ajinov5",
@@ -43,6 +52,52 @@ async def get_pool() -> asyncpg.Pool:
     return db_pool
 
 
+# ─── Telegram Session Helpers ────────────────────────────
+
+
+async def get_or_create_telegram_session(telegram_id: str) -> str:
+    """Get or create the single chat_session for a Telegram user."""
+    pool = await get_pool()
+
+    # Find existing telegram session
+    row = await pool.fetchrow(
+        "SELECT id FROM chat_sessions WHERE metadata->>'telegram_id' = $1 AND metadata->>'surface' = 'telegram' LIMIT 1",
+        telegram_id,
+    )
+    if row:
+        return str(row["id"])
+
+    # Create new session
+    sid = str(uuid.uuid4())
+    await pool.execute(
+        "INSERT INTO chat_sessions (id, user_id, title, metadata) VALUES ($1, (SELECT id FROM users WHERE telegram_id = $2 LIMIT 1), $3, $4)",
+        sid,
+        int(telegram_id),
+        f"Telegram Chat - {telegram_id}",
+        json.dumps({"telegram_id": telegram_id, "surface": "telegram"}),
+    )
+    return sid
+
+
+async def get_telegram_context(telegram_id: str) -> list[dict]:
+    """Get 10 most recent messages for a Telegram user."""
+    pool = await get_pool()
+
+    # Find telegram session
+    row = await pool.fetchrow(
+        "SELECT id FROM chat_sessions WHERE metadata->>'telegram_id' = $1 AND metadata->>'surface' = 'telegram' ORDER BY updated_at DESC LIMIT 1",
+        telegram_id,
+    )
+    if not row:
+        return []
+
+    messages = await pool.fetch(
+        "SELECT role, content FROM chat_messages WHERE session_id = $1 ORDER BY created_at DESC LIMIT 10",
+        row["id"],
+    )
+    return [dict(m) for m in reversed(messages)]
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize DB schema on startup."""
@@ -63,6 +118,36 @@ async def startup():
                         if "already exists" not in str(e):
                             print(f"Schema warning: {e}")
         print("Database initialized")
+
+        # Seed skill records (upsert — won't overwrite if exists)
+        seed_skills = [
+            (
+                "file_converter",
+                "Convert uploaded files (docx, pdf, pptx, xlsx, html, images, audio, etc.) to Markdown using MarkItDown",
+                "1.0.0",
+            ),
+            (
+                "memory_retrieval",
+                "Retrieve canonical memories from pgvector hybrid vector+keyword search",
+                "1.0.0",
+            ),
+            (
+                "web_search",
+                "Search the web using Serper API for real-time information",
+                "1.0.0",
+            ),
+        ]
+        for name, desc, ver in seed_skills:
+            try:
+                await pool.execute(
+                    "INSERT INTO skills (name, description, version) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING",
+                    name,
+                    desc,
+                    ver,
+                )
+            except Exception:
+                pass  # Table may not exist yet on first run
+        print("Skills seeded")
     except Exception as e:
         print(f"Startup warning (DB not ready?): {e}")
 
@@ -117,6 +202,7 @@ async def _persist_chat_and_extract_memory(
     user_id: str | None,
     session_id: str | None,
     pool: asyncpg.Pool,
+    surface: str = "web",
 ):
     """
     Persist chat messages to DB and auto-extract memory candidates.
@@ -136,10 +222,21 @@ async def _persist_chat_and_extract_memory(
 
     if user_uuid and not session_id:
         try:
+            metadata = (
+                json.dumps(
+                    {
+                        "telegram_id": str(user_id),
+                        "surface": surface,
+                    }
+                )
+                if surface == "telegram"
+                else "{}"
+            )
             row = await pool.fetchrow(
-                "INSERT INTO chat_sessions (user_id, title) VALUES ($1, $2) RETURNING id",
+                "INSERT INTO chat_sessions (user_id, title, metadata) VALUES ($1, $2, $3::jsonb) RETURNING id",
                 user_uuid,
                 message[:80],
+                metadata,
             )
             session_id = str(row["id"])
         except Exception:
@@ -216,6 +313,7 @@ async def chat(request: dict):
     mode = request.get("reasoning_mode", "auto")
     user_id = request.get("user_id")
     session_id = request.get("session_id")
+    surface = request.get("surface", "web")
 
     if not message:
         raise HTTPException(status_code=400, detail="Missing message")
@@ -231,6 +329,7 @@ async def chat(request: dict):
         litellm_api_key=LITELLM_MASTER_KEY,
         serper_key=SERPER_KEY,
         db_pool=pool,
+        telegram_id=str(user_id) if surface == "telegram" and user_id else None,
     )
 
     # Persist chat + auto-extract memory
@@ -241,7 +340,12 @@ async def chat(request: dict):
         user_id=user_id,
         session_id=session_id,
         pool=pool,
+        surface=surface,
     )
+
+    # Background: extract facts for Telegram short-term buffer
+    if surface == "telegram" and user_id:
+        asyncio.create_task(_extract_and_buffer_background(str(user_id), message, pool))
 
     return {"data": result}
 
@@ -254,6 +358,7 @@ async def chat_stream(request: dict):
     mode = request.get("reasoning_mode", "auto")
     user_id = request.get("user_id")
     session_id = request.get("session_id")
+    surface = request.get("surface", "web")
 
     if not message:
         raise HTTPException(status_code=400, detail="Missing message")
@@ -274,6 +379,7 @@ async def chat_stream(request: dict):
                 litellm_api_key=LITELLM_MASTER_KEY,
                 serper_key=SERPER_KEY,
                 db_pool=pool,
+                telegram_id=str(user_id) if surface == "telegram" and user_id else None,
             )
 
             # Send trace events
@@ -310,6 +416,7 @@ async def chat_stream(request: dict):
                 user_id=user_id,
                 session_id=session_id,
                 pool=pool,
+                surface=surface,
             )
 
         except Exception as e:
@@ -408,18 +515,22 @@ async def create_memory(request: dict):
 @app.get("/memory")
 async def list_memories(
     status: str = Query(None, description="Filter: pending, canonical, archived"),
+    source_ref: str = Query(
+        None, description="Filter by source_ref (document/capture ID)"
+    ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
     """
-    GET /memory?status=pending|canonical|archived&limit=20&offset=0
-    List memories with optional status filter.
+    GET /memory?status=pending|canonical|archived&source_ref=UUID&limit=20&offset=0
+    List memories with optional status and source_ref filters.
     """
     pool = await get_pool()
     from agents.memory_agent import list_memories as list_mem
 
     results = await list_mem(
         status=status if status else None,
+        source_ref=source_ref if source_ref else None,
         limit=limit,
         offset=offset,
         db_pool=pool,
@@ -451,9 +562,34 @@ async def update_memory(memory_id: str, request: dict):
                 detail="Invalid status. Must be 'canonical' or 'archived'.",
             )
 
-        from agents.memory_agent import approve_memory, reject_memory
+        from agents.memory_agent import approve_memory, get_embedding, reject_memory
 
         if new_status == "canonical":
+            # Ensure embedding exists synchronously before approving
+            row = await pool.fetchrow(
+                "SELECT content, embedding FROM memory WHERE id = $1::uuid AND status = 'pending'",
+                memory_id,
+            )
+            if not row:
+                raise HTTPException(
+                    status_code=404, detail="Memory not found or not pending"
+                )
+
+            if row["embedding"] is None:
+                try:
+                    embedding = await get_embedding(row["content"])
+                    vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
+                    await pool.execute(
+                        "UPDATE memory SET embedding = $1::vector WHERE id = $2::uuid",
+                        vec_str,
+                        memory_id,
+                    )
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Embedding failed: {str(e)}",
+                    )
+
             result = await approve_memory(
                 memory_id=memory_id,
                 approved_by=user_id,
@@ -618,3 +754,848 @@ async def list_skills():
         return {"data": [dict(r) for r in rows]}
     except Exception:
         return {"data": []}
+
+
+# ═══════════════════════════════════════════════════════════
+# DEEP RESEARCH ENDPOINT
+# ═══════════════════════════════════════════════════════════
+
+
+@app.post("/research/stream")
+async def research_stream(request: dict):
+    """
+    POST /research/stream — Deep Research mode SSE.
+    1. LLM generates 10-12 research questions
+    2. Each question: web search + memory retrieval
+    3. LLM compiles structured Markdown report
+    4. Report saved to studio_documents
+    SSE events: start → plan → progress (per question) → compiling → done | error
+    """
+    topic = (request.get("topic") or request.get("message", "")).strip()
+    user_id = request.get("user_id")
+
+    if not topic:
+        raise HTTPException(status_code=400, detail="Missing topic")
+
+    pool = await get_pool()
+
+    async def event_stream():
+        yield f"data: {json.dumps({'event': 'start'})}\n\n"
+
+        try:
+            from agents.deep_research import (
+                compile_research_report,
+                generate_research_plan,
+                research_single_question,
+            )
+
+            # Stage 1: Generate research plan
+            yield f"data: {json.dumps({'event': 'progress', 'step': 'planning', 'message': 'Đang lập kế hoạch nghiên cứu...'})}\n\n"
+            questions = await generate_research_plan(topic, LITELLM_URL, LITELLM_MASTER_KEY)
+            yield f"data: {json.dumps({'event': 'plan', 'questions': questions})}\n\n"
+
+            # Stage 2: Research each question
+            all_findings = []
+            for i, question in enumerate(questions):
+                yield f"data: {json.dumps({'event': 'progress', 'step': 'researching', 'question': question, 'index': i + 1, 'total': len(questions)})}\n\n"
+                findings = await research_single_question(
+                    question=question,
+                    serper_key=SERPER_KEY,
+                    db_pool=pool,
+                )
+                all_findings.append(findings)
+                await asyncio.sleep(0.05)
+
+            # Stage 3: Compile report
+            yield f"data: {json.dumps({'event': 'progress', 'step': 'compiling', 'message': 'Đang tổng hợp báo cáo...'})}\n\n"
+            report_content = await compile_research_report(
+                topic=topic,
+                all_findings=all_findings,
+                model="deepseek-pro",
+                litellm_url=LITELLM_URL,
+                litellm_api_key=LITELLM_MASTER_KEY,
+            )
+
+            # Stage 4: Save to Studio
+            doc_id = str(uuid.uuid4())
+            report_title = f"Nghiên cứu: {topic[:80]}"
+
+            user_uuid = None
+            if user_id:
+                try:
+                    row = await pool.fetchrow(
+                        "INSERT INTO users (telegram_id, role) VALUES ($1, 'ceo') "
+                        "ON CONFLICT (telegram_id) DO UPDATE SET name = users.name RETURNING id",
+                        int(user_id),
+                    )
+                    user_uuid = row["id"]
+                except Exception:
+                    pass
+
+            await pool.execute(
+                "INSERT INTO studio_documents (id, user_id, title, content) VALUES ($1, $2, $3, $4)",
+                doc_id,
+                user_uuid,
+                report_title,
+                report_content,
+            )
+
+            try:
+                await pool.execute(
+                    "INSERT INTO audit_log (user_id, action, resource_type, resource_id, payload) "
+                    "VALUES ($1, 'research.complete', 'studio_document', $2, $3)",
+                    user_uuid,
+                    doc_id,
+                    json.dumps(
+                        {
+                            "topic": topic,
+                            "questions": len(questions),
+                            "chars": len(report_content),
+                        }
+                    ),
+                )
+            except Exception:
+                pass
+
+            word_count = len(report_content.split())
+            yield f"data: {json.dumps({'event': 'done', 'doc_id': doc_id, 'title': report_title, 'word_count': word_count, 'question_count': len(questions)})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# STUDIO ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+
+@app.post("/studio/documents")
+async def create_document(request: Request):
+    """POST /studio/documents — Create a Markdown document.
+
+    Supports two modes:
+    1. JSON body: { title, content, user_id? }
+    2. Multipart form: file (UploadFile) + title? (optional, defaults to filename)
+
+    When a file is uploaded, it is automatically converted to Markdown
+    using the file_converter skill (MarkItDown).
+    """
+    content_type_header = request.headers.get("content-type", "")
+    is_multipart = "multipart/form-data" in content_type_header
+
+    title = ""
+    content = ""
+    user_ref = "1"
+    r2_key = None
+
+    if is_multipart:
+        # ── Multipart file upload mode ─────────────────────────────────
+        form = await request.form()
+        file: UploadFile | None = form.get("file")
+        if file is None:
+            raise HTTPException(status_code=400, detail="Missing file in form data")
+
+        # Read form fields
+        title = (
+            form.get("title") if isinstance(form.get("title"), str) else ""
+        ).strip()
+        if isinstance(form.get("user_id"), str):
+            user_ref = form.get("user_id")
+
+        # Get content type from uploaded file
+        file_content_type = file.content_type
+        original_filename = file.filename or "uploaded_file"
+
+        # Auto-title from filename if not provided
+        if not title:
+            title = os.path.splitext(original_filename)[0]
+
+        # Read file bytes
+        file_bytes = await file.read()
+
+        # Validate that we have content
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="File trống")
+
+        # Convert to Markdown using the file_converter skill
+        try:
+            from skills.file_converter import convert_to_markdown
+
+            content = await convert_to_markdown(
+                file_bytes=file_bytes,
+                content_type=file_content_type,
+                original_filename=original_filename,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Lỗi chuyển đổi file: {str(e)}",
+            )
+
+        # Optionally upload original to R2 as background task
+        # (only if R2 credentials are configured)
+        r2_key = None
+        r2_endpoint = os.environ.get("R2_ENDPOINT")
+        r2_bucket = os.environ.get("R2_BUCKET_NAME")
+        if r2_endpoint and r2_bucket:
+            try:
+                import boto3
+                from botocore.config import Config as BotoConfig
+
+                s3 = boto3.client(
+                    "s3",
+                    endpoint_url=r2_endpoint,
+                    aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
+                    aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"),
+                    config=BotoConfig(
+                        region_name="auto",
+                        signature_version="s3v4",
+                    ),
+                )
+                import uuid as _uuid_inner
+
+                r2_key = f"studio/{_uuid_inner.uuid4()}_{original_filename}"
+                s3.put_object(
+                    Bucket=r2_bucket,
+                    Key=r2_key,
+                    Body=file_bytes,
+                    ContentType=file_content_type or "application/octet-stream",
+                )
+            except Exception as e:
+                # R2 upload is best-effort — log but don't fail the request
+                print(f"R2 upload warning (non-fatal): {e}")
+                r2_key = None
+    else:
+        # ── JSON body mode (backward compatible) ──────────────────────
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+        title = body.get("title", "").strip()
+        content = body.get("content", "").strip()
+        user_ref = body.get("user_id", "1")
+
+        if not title or not content:
+            raise HTTPException(status_code=400, detail="Missing title or content")
+
+    # ── Common: insert studio_documents row ───────────────────────────
+    import uuid as _uuid
+
+    pool = await get_pool()
+
+    # Resolve user UUID from telegram_id
+    user_uuid = None
+    try:
+        telegram_id_int = int(user_ref)
+        row = await pool.fetchrow(
+            "SELECT id FROM users WHERE telegram_id = $1", telegram_id_int
+        )
+        if not row:
+            row = await pool.fetchrow(
+                "INSERT INTO users (telegram_id, role) VALUES ($1, 'ceo') ON CONFLICT (telegram_id) DO UPDATE SET name = users.name RETURNING id",
+                telegram_id_int,
+            )
+        user_uuid = row["id"]
+    except Exception:
+        user_uuid = None
+
+    doc_id = str(_uuid.uuid4())
+    await pool.execute(
+        "INSERT INTO studio_documents (id, user_id, title, content, r2_key) VALUES ($1, $2, $3, $4, $5)",
+        doc_id,
+        user_uuid,
+        title,
+        content,
+        r2_key,
+    )
+
+    # Audit log
+    try:
+        await pool.execute(
+            "INSERT INTO audit_log (user_id, action, resource_type, resource_id, payload) VALUES ($1, 'studio.create', 'studio_document', $2, $3)",
+            user_uuid,
+            doc_id,
+            json.dumps(
+                {
+                    "title": title,
+                    "char_count": len(content),
+                    "source": "file_upload" if is_multipart else "manual",
+                    "original_filename": original_filename if is_multipart else None,
+                    "r2_key": r2_key,
+                },
+                default=str,
+            ),
+        )
+    except Exception as e:
+        print(f"Audit log warning: {e}")
+
+    return {
+        "data": {
+            "id": doc_id,
+            "title": title,
+            "compile_status": "draft",
+            "r2_key": r2_key,
+        },
+        "error": None,
+    }
+
+
+@app.post("/studio/documents/{doc_id}/compile")
+async def compile_document(doc_id: str, request: dict):
+    """Compile document into memory with smart chunking."""
+    pool = await get_pool()
+    user_ref = request.get("user_id", "1")
+
+    row = await pool.fetchrow(
+        "SELECT id, title, content, compile_status FROM studio_documents WHERE id = $1",
+        doc_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if row["compile_status"] == "compiling":
+        raise HTTPException(status_code=409, detail="Already compiling")
+
+    await pool.execute(
+        "UPDATE studio_documents SET compile_status = 'compiling', updated_at = now() WHERE id = $1",
+        doc_id,
+    )
+
+    try:
+        content_text = row["content"]
+        char_count = len(content_text)
+
+        # Smart chunking based on file size
+        chunks = chunk_markdown_v2(content_text)
+
+        if not chunks:
+            raise ValueError("Không tách được nội dung có ý nghĩa từ tài liệu")
+
+        capped = len(chunks) > 50
+        chunks = chunks[:50]
+
+        memory_ids = []
+        for chunk in chunks:
+            mid = str(uuid.uuid4())
+            await pool.execute(
+                "INSERT INTO memory (id, content, status, source, source_ref, metadata) VALUES ($1, $2, 'pending', 'studio', $3, $4)",
+                mid,
+                chunk,
+                doc_id,
+                json.dumps({"document_title": row["title"], "document_id": doc_id}),
+            )
+            memory_ids.append(mid)
+
+        await pool.execute(
+            "UPDATE studio_documents SET compile_status = 'compiled', memory_ids = $1, updated_at = now() WHERE id = $2",
+            memory_ids,
+            doc_id,
+        )
+
+        # Audit
+        try:
+            await pool.execute(
+                "INSERT INTO audit_log (user_id, action, resource_type, resource_id, payload) VALUES ($1, 'studio.compile', 'studio_document', $2, $3)",
+                user_ref,
+                doc_id,
+                json.dumps(
+                    {"chunks": len(memory_ids), "chars": char_count, "capped": capped}
+                ),
+            )
+        except:
+            pass
+
+        return {
+            "data": {
+                "memory_ids": memory_ids,
+                "count": len(memory_ids),
+                "capped": capped,
+                "char_count": char_count,
+            },
+            "error": None,
+        }
+
+    except Exception as e:
+        await pool.execute(
+            "UPDATE studio_documents SET compile_status = 'failed', updated_at = now() WHERE id = $1",
+            doc_id,
+        )
+        raise HTTPException(status_code=422, detail=f"Compile failed: {str(e)}")
+
+
+@app.get("/studio/documents")
+async def list_documents():
+    """GET /studio/documents — List all studio documents."""
+    try:
+        pool = await get_pool()
+        rows = await pool.fetch(
+            "SELECT id, title, compile_status, updated_at FROM studio_documents ORDER BY updated_at DESC LIMIT 20"
+        )
+        return {"data": [dict(r) for r in rows]}
+    except Exception:
+        return {"data": []}
+
+
+# ═══════════════════════════════════════════════════════════
+# CAPTURE ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+
+@app.post("/capture")
+async def create_capture(request: dict):
+    """POST /capture — Create a capture and trigger async fact extraction."""
+    content = request.get("content", "").strip()
+    capture_type = request.get("type", "text")
+    user_ref = request.get("user_id", "1")
+    url = request.get("url")
+
+    if not content:
+        raise HTTPException(status_code=400, detail="Missing content")
+
+    pool = await get_pool()
+
+    # Resolve user
+    user_uuid = None
+    try:
+        row = await pool.fetchrow(
+            "INSERT INTO users (telegram_id, role) VALUES ($1, 'ceo') "
+            "ON CONFLICT (telegram_id) DO UPDATE SET name = users.name RETURNING id",
+            int(user_ref),
+        )
+        user_uuid = row["id"]
+    except Exception as e:
+        print(f"User upsert warning in capture: {e}")
+        user_uuid = None
+
+    if not user_uuid:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    capture_id = str(uuid.uuid4())
+    await pool.execute(
+        "INSERT INTO captures (id, user_id, type, content, url) VALUES ($1, $2, $3, $4, $5)",
+        capture_id,
+        user_uuid,
+        capture_type,
+        content,
+        url,
+    )
+
+    # Async fact extraction
+    asyncio.create_task(_extract_facts(capture_id, content, pool))
+
+    return {"data": {"id": capture_id, "status": "processing"}, "error": None}
+
+
+async def _extract_facts(capture_id: str, content: str, pool):
+    """Background task: extract facts from capture content using LLM."""
+    try:
+        prompt = f"""Extract key business facts from this text. Return ONLY a JSON array.
+Format: [{{"fact": "string", "confidence": 0.0-1.0}}]
+Include only factual, actionable items. Skip opinions and greetings.
+Max 5 facts.
+
+Text: {content}"""
+
+        headers = {"Content-Type": "application/json"}
+        if LITELLM_MASTER_KEY:
+            headers["Authorization"] = f"Bearer {LITELLM_MASTER_KEY}"
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{LITELLM_URL}/chat/completions",
+                json={
+                    "model": "deepseek-flash",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 300,
+                    "temperature": 0,
+                },
+                headers=headers,
+            )
+            data = resp.json()
+            raw = data["choices"][0]["message"]["content"]
+
+            # Parse JSON from response
+            match = re.search(r"\[.*\]", raw, re.DOTALL)
+            facts = json.loads(match.group(0)) if match else []
+
+            await pool.execute(
+                "UPDATE captures SET status = 'extracted', extracted_facts = $1 WHERE id = $2",
+                json.dumps(facts),
+                capture_id,
+            )
+    except Exception as e:
+        print(f"Fact extraction error for {capture_id}: {e}")
+        try:
+            await pool.execute(
+                "UPDATE captures SET status = 'failed' WHERE id = $1", capture_id
+            )
+        except Exception:
+            pass
+
+
+@app.get("/capture/{capture_id}")
+async def get_capture(capture_id: str):
+    """GET /capture/{id} — Get capture status and extracted facts."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT id, type, content, extracted_facts, status, created_at FROM captures WHERE id = $1",
+        capture_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Capture not found")
+    return {"data": dict(row), "error": None}
+
+
+@app.post("/capture/{capture_id}/commit")
+async def commit_capture(capture_id: str, request: dict):
+    """POST /capture/{id}/commit — Commit extracted facts to memory."""
+    pool = await get_pool()
+    from agents.memory_agent import store_memory
+
+    row = await pool.fetchrow(
+        "SELECT extracted_facts FROM captures WHERE id = $1 AND status = 'extracted'",
+        capture_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=404, detail="Capture not found or not extracted yet"
+        )
+
+    facts = (
+        json.loads(row["extracted_facts"])
+        if isinstance(row["extracted_facts"], str)
+        else row["extracted_facts"] or []
+    )
+    memory_ids = []
+
+    for fact in facts:
+        mid = await store_memory(content=fact["fact"], source="capture", db_pool=pool)
+        if mid:
+            memory_ids.append(mid)
+
+    await pool.execute(
+        "UPDATE captures SET status = 'committed' WHERE id = $1", capture_id
+    )
+
+    # Audit
+    try:
+        await pool.execute(
+            "INSERT INTO audit_log (user_id, action, resource_type, resource_id, payload) VALUES ($1, 'capture.commit', 'capture', $2, $3)",
+            request.get("user_id", "1"),
+            capture_id,
+            json.dumps({"memory_ids": memory_ids}),
+        )
+    except Exception:
+        pass
+
+    return {"data": {"memory_ids": memory_ids}, "error": None}
+
+
+# ═══════════════════════════════════════════════════════════
+# REMINDERS ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+
+@app.post("/reminders")
+async def create_reminder(request: dict):
+    """POST /reminders — Create a reminder."""
+    content = request.get("content", "").strip()
+    remind_at = request.get("remind_at")  # ISO timestamp
+    telegram_id = request.get("telegram_id")
+    user_ref = request.get("user_id", "1")
+
+    if not content or not remind_at:
+        raise HTTPException(status_code=400, detail="Missing content or remind_at")
+
+    pool = await get_pool()
+
+    # Resolve user
+    user_uuid = None
+    try:
+        row = await pool.fetchrow(
+            "SELECT id FROM users WHERE telegram_id = $1", str(telegram_id or user_ref)
+        )
+        if row:
+            user_uuid = row["id"]
+    except Exception:
+        pass
+
+    rid = str(uuid.uuid4())
+    remind_dt = datetime.fromisoformat(remind_at.replace("Z", "+00:00"))
+    await pool.execute(
+        "INSERT INTO reminders (id, user_id, telegram_id, content, remind_at) VALUES ($1, $2, $3, $4, $5)",
+        rid,
+        user_uuid,
+        int(telegram_id or 0),
+        content,
+        remind_dt,
+    )
+
+    # Audit
+    try:
+        await pool.execute(
+            "INSERT INTO audit_log (user_id, action, resource_type, resource_id, payload) VALUES ($1, 'reminder.create', 'reminder', $2, $3)",
+            user_uuid,
+            rid,
+            json.dumps({"content": content[:100], "remind_at": remind_at}),
+        )
+    except Exception:
+        pass
+
+    return {"data": {"id": rid, "status": "created"}, "error": None}
+
+
+@app.get("/reminders/pending")
+async def get_pending_reminders():
+    """GET /reminders/pending — Get reminders that are due but not yet notified."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id, telegram_id, content, remind_at FROM reminders WHERE remind_at <= now() AND notified_at IS NULL ORDER BY remind_at LIMIT 10"
+    )
+    return {"data": [dict(r) for r in rows], "error": None}
+
+
+@app.post("/reminders/{reminder_id}/notify")
+async def mark_reminder_notified(reminder_id: str):
+    """POST /reminders/{id}/notify — Mark reminder as notified."""
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE reminders SET notified_at = now() WHERE id = $1", reminder_id
+    )
+    return {"data": {"id": reminder_id, "notified": True}, "error": None}
+
+
+# ═══════════════════════════════════════════════════════════
+# ADMIN ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+
+@app.post("/admin/memory/bulk-approve")
+async def bulk_approve_memory(request: dict):
+    """Bulk approve memories (max 20). Sequential embedding."""
+    ids = request.get("ids", [])
+    if len(ids) > 20:
+        raise HTTPException(status_code=400, detail="Max 20 items per batch")
+
+    pool = await get_pool()
+    from agents.memory_agent import get_embedding
+
+    approved, failed = 0, 0
+    for mid in ids:
+        try:
+            # Get memory content
+            row = await pool.fetchrow(
+                "SELECT content, embedding FROM memory WHERE id = $1::uuid AND status = 'pending'",
+                mid,
+            )
+            if not row:
+                failed += 1
+                continue
+            # Generate embedding if missing
+            if row["embedding"] is None:
+                embedding = await get_embedding(row["content"])
+                vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
+                await pool.execute(
+                    "UPDATE memory SET embedding = $1::vector WHERE id = $2::uuid",
+                    vec_str,
+                    mid,
+                )
+            # Approve
+            await pool.execute(
+                "UPDATE memory SET status = 'canonical', approved_at = now(), decay_at = now() + interval '730 days' WHERE id = $1::uuid",
+                mid,
+            )
+            approved += 1
+        except Exception as e:
+            print(f"[admin] bulk_approve error for {mid}: {e}")
+            failed += 1
+
+    # Audit log
+    try:
+        await pool.execute(
+            "INSERT INTO audit_log (action, resource_type, payload) VALUES ('admin.bulk_approve', 'memory', $1)",
+            json.dumps({"approved": approved, "failed": failed}),
+        )
+    except Exception:
+        pass
+
+    return {"data": {"approved": approved, "failed": failed}, "error": None}
+
+
+@app.get("/admin/audit")
+async def list_audit(
+    cursor: str = Query(None, description="Cursor (created_at ISO) for pagination"),
+    limit: int = Query(50, ge=1, le=100),
+):
+    """Cursor-based paginated audit log."""
+    pool = await get_pool()
+    if cursor:
+        cursor_dt = datetime.fromisoformat(cursor)
+        rows = await pool.fetch(
+            "SELECT id, user_id, action, resource_type, resource_id, llm_model, llm_tokens, created_at "
+            "FROM audit_log WHERE created_at < $1::timestamptz ORDER BY created_at DESC LIMIT $2",
+            cursor_dt,
+            min(limit, 100),
+        )
+    else:
+        rows = await pool.fetch(
+            "SELECT id, user_id, action, resource_type, resource_id, llm_model, llm_tokens, created_at "
+            "FROM audit_log ORDER BY created_at DESC LIMIT $1",
+            min(limit, 100),
+        )
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["created_at"] = r["created_at"].isoformat() if r["created_at"] else None
+        result.append(d)
+    next_cursor = result[-1]["created_at"] if result else None
+    return {"data": result, "cursor": next_cursor, "error": None}
+
+
+@app.get("/admin/audit/export")
+async def export_audit():
+    """Export audit log as CSV."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT created_at, action, resource_type, llm_model, llm_tokens "
+        "FROM audit_log ORDER BY created_at DESC LIMIT 1000"
+    )
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        ["created_at", "action", "resource_type", "llm_model", "llm_tokens"]
+    )
+    for r in rows:
+        writer.writerow(
+            [
+                r["created_at"],
+                r["action"],
+                r["resource_type"],
+                r["llm_model"],
+                r["llm_tokens"],
+            ]
+        )
+    from fastapi.responses import Response
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit_log.csv"},
+    )
+
+
+@app.get("/admin/metrics")
+async def admin_metrics():
+    """Admin dashboard metrics."""
+    pool = await get_pool()
+    canonical = await pool.fetchval(
+        "SELECT COUNT(*) FROM memory WHERE status = 'canonical'"
+    )
+    pending = await pool.fetchval(
+        "SELECT COUNT(*) FROM memory WHERE status = 'pending'"
+    )
+    sessions_today = await pool.fetchval(
+        "SELECT COUNT(*) FROM chat_sessions WHERE created_at::date = CURRENT_DATE"
+    )
+    messages_today = await pool.fetchval(
+        "SELECT COUNT(*) FROM chat_messages WHERE created_at::date = CURRENT_DATE"
+    )
+    tokens_today = await pool.fetchval(
+        "SELECT COALESCE(SUM(llm_tokens),0) FROM audit_log WHERE created_at::date = CURRENT_DATE"
+    )
+    return {
+        "data": {
+            "canonical_count": canonical,
+            "pending_count": pending,
+            "sessions_today": sessions_today,
+            "messages_today": messages_today,
+            "tokens_today": tokens_today,
+        },
+        "error": None,
+    }
+
+
+# ─── Smart Chunking ──────────────────────────────────────
+
+
+def chunk_markdown_v2(content: str) -> list:
+    """Split markdown into meaningful chunks based on size."""
+    char_count = len(content)
+
+    if char_count < 5000:
+        return chunk_by_paragraph(content)
+    elif char_count < 20000:
+        return chunk_by_heading(content, [2, 3])
+    else:
+        chunks = chunk_by_heading(content, [1, 2])
+        return chunks[:50]  # Hard cap
+
+
+def chunk_by_paragraph(content: str) -> list:
+    chunks = []
+    current = []
+    for line in content.split("\n"):
+        if line.strip() == "" and current:
+            chunk = "\n".join(current).strip()
+            if len(chunk) >= 50:
+                if len(chunk) > 800:
+                    # Sub-split long paragraphs by sentence
+                    sentences = re.split(r"(?<=[.!?])\s+", chunk)
+                    sub = []
+                    for s in sentences:
+                        sub.append(s)
+                        if len(" ".join(sub)) > 400:
+                            chunks.append(" ".join(sub))
+                            sub = []
+                    if sub:
+                        chunks.append(" ".join(sub))
+                else:
+                    chunks.append(chunk)
+            current = []
+        else:
+            current.append(line)
+    if current:
+        chunk = "\n".join(current).strip()
+        if len(chunk) >= 50:
+            chunks.append(chunk)
+    return chunks
+
+
+def chunk_by_heading(content: str, levels: list) -> list:
+    pattern = "^(" + "|".join("#" * l + " " for l in levels) + ")"
+    heading_re = re.compile(pattern, re.MULTILINE)
+
+    positions = [m.start() for m in heading_re.finditer(content)]
+    positions.append(len(content))
+
+    chunks = []
+    for i in range(len(positions) - 1):
+        chunk = content[positions[i] : positions[i + 1]].strip()
+        if len(chunk) >= 50:
+            if len(chunk) > 800:
+                chunks.extend(chunk_by_paragraph(chunk))
+            else:
+                chunks.append(chunk)
+
+    # Intro before first heading
+    if positions and positions[0] > 0:
+        intro = content[: positions[0]].strip()
+        if len(intro) >= 50:
+            chunks.insert(0, intro)
+
+    return chunks

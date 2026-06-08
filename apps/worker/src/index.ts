@@ -26,6 +26,7 @@ type Bindings = {
   AI: { run: (model: string, input: unknown) => Promise<{ data: number[][] }> };
   JWT_SECRET: string;
   TELEGRAM_BOT_TOKEN: string;
+  INTERNAL_SECRET: string;
 };
 
 // ─── HELPERS ───────────────────────────────────────────
@@ -330,6 +331,41 @@ app.get("/api/me", (c: Context<{ Bindings: Bindings }>) => {
   return c.json({ data: { user: payload } });
 });
 
+// Telegram webhook proxy → Messaging Gateway
+app.all("/telegram/*", async (c: Context<{ Bindings: Bindings }>) => {
+  // Proxy to messaging gateway (port 3000) via tunnel
+  const url = new URL(c.req.url);
+  const target = `http://messaging:3000${c.req.path}${url.search}`;
+
+  // For tunnel routing, use the webhook subdomain
+  const targetUrl = `https://webhook.ajinov5.cuong.ngo${c.req.path}${url.search}`;
+
+  try {
+    const headers = new Headers(c.req.raw.headers);
+    headers.set(
+      "X-Forwarded-For",
+      c.req.header("CF-Connecting-IP") || "unknown",
+    );
+
+    return await fetch(targetUrl, {
+      method: c.req.method,
+      headers,
+      body:
+        c.req.method !== "GET" && c.req.method !== "HEAD"
+          ? await c.req.raw.clone().arrayBuffer()
+          : undefined,
+    });
+  } catch {
+    return c.json(
+      {
+        data: null,
+        error: { code: "SVC_001", message: "SERVICE_UNAVAILABLE" },
+      },
+      503,
+    );
+  }
+});
+
 // Chat API proxy
 app.all("/api/chat/*", (c: Context<{ Bindings: Bindings }>) => {
   return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
@@ -355,47 +391,138 @@ app.all("/api/console/*", (c: Context<{ Bindings: Bindings }>) => {
   return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
 });
 
-// Admin API proxy
-app.all("/admin/*", (c: Context<{ Bindings: Bindings }>) => {
+// Research API proxy (Deep Research mode)
+app.all("/api/research/*", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+});
+
+// Admin API proxy (via /api prefix)
+app.all("/api/admin/*", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+});
+
+// Admin API proxy (direct paths — avoid intercepting SPA page load at GET /admin)
+app.post("/admin/memory/bulk-approve", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path);
+});
+app.get("/admin/audit/export", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path);
+});
+app.get("/admin/audit", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path);
+});
+app.get("/admin/settings", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, c.req.path);
+});
+// Catch-all admin sub-routes (POST, PUT, PATCH to /admin/...)
+app.all("/admin/:path{[^/]+}", (c: Context<{ Bindings: Bindings }>) => {
   return proxyToVPS(c.req.raw, c.req.path);
 });
 
+// ─── INTERNAL ROUTES (VPS → Worker KV access) ──────────
+// Protected by X-Internal-Secret header
+const internalAuth = async (
+  c: Context<{ Bindings: Bindings }>,
+  next: Function,
+) => {
+  const secret = c.req.header("X-Internal-Secret");
+  if (secret !== c.env.INTERNAL_SECRET) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+  await next();
+};
+
+// Get Telegram state
+app.get(
+  "/internal/kv/tgstate/:id",
+  internalAuth,
+  async (c: Context<{ Bindings: Bindings }>) => {
+    const val = await c.env.OTP_KV.get(`tgstate:${c.req.param("id")}`, {
+      type: "json",
+    });
+    return val ? c.json(val) : c.json(null, 404);
+  },
+);
+
+// Set Telegram state (TTL 300s)
+app.put(
+  "/internal/kv/tgstate/:id",
+  internalAuth,
+  async (c: Context<{ Bindings: Bindings }>) => {
+    const body = await c.req.json();
+    await c.env.OTP_KV.put(
+      `tgstate:${c.req.param("id")}`,
+      JSON.stringify(body),
+      { expirationTtl: 300 },
+    );
+    return c.json({ ok: true });
+  },
+);
+
+// Delete Telegram state
+app.delete(
+  "/internal/kv/tgstate/:id",
+  internalAuth,
+  async (c: Context<{ Bindings: Bindings }>) => {
+    await c.env.OTP_KV.delete(`tgstate:${c.req.param("id")}`);
+    return c.json({ ok: true });
+  },
+);
+
+// Short-term buffer for Telegram context (30min TTL)
+app.get(
+  "/internal/kv/stbuf/:id",
+  internalAuth,
+  async (c: Context<{ Bindings: Bindings }>) => {
+    const val = await c.env.OTP_KV.get(`stbuf:${c.req.param("id")}`, {
+      type: "json",
+    });
+    return val ? c.json(val) : c.json(null, 404);
+  },
+);
+
+app.put(
+  "/internal/kv/stbuf/:id",
+  internalAuth,
+  async (c: Context<{ Bindings: Bindings }>) => {
+    const body = await c.req.json();
+    await c.env.OTP_KV.put(`stbuf:${c.req.param("id")}`, JSON.stringify(body), {
+      expirationTtl: 1800,
+    });
+    return c.json({ ok: true });
+  },
+);
+
+app.delete(
+  "/internal/kv/stbuf/:id",
+  internalAuth,
+  async (c: Context<{ Bindings: Bindings }>) => {
+    await c.env.OTP_KV.delete(`stbuf:${c.req.param("id")}`);
+    return c.json({ ok: true });
+  },
+);
+
 // ─── FRONTEND (served via [assets] in wrangler.toml) ────
-// The [assets] directive serves the React build from ./static/
-// This handler is a fallback for SPA client-side routing
-app.notFound((c: Context<{ Bindings: Bindings }>) => {
-  return c.html(
-    `<!DOCTYPE html>
+// Serve React SPA for all frontend routes
+// All static files (JS, CSS, images) are served automatically via [assets]
+// This notFound handler serves index.html for SPA client-side routing
+app.notFound(async (c: Context<{ Bindings: Bindings }>) => {
+  c.header("Cache-Control", "no-cache, no-store, must-revalidate");
+  return c.html(`<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ajino v5</title>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600&family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{background:#070910;color:#dde2ec;font-family:'DM Sans',sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh}
-    .card{text-align:center;padding:40px}
-    h1{font-size:48px;color:#00c8a4;font-family:'Exo 2',sans-serif;margin-bottom:16px}
-    p{color:#52586a;margin-bottom:24px;font-family:'DM Sans',sans-serif}
-    .status{font-size:12px;color:#00c8a4;margin-top:24px;font-family:'JetBrains Mono',monospace}
-  </style>
-  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600&family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script type="module" crossorigin src="/assets/index-24AhfoVi.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BbhOUUwD.css">
 </head>
 <body>
-  <div class="card">
-    <h1>Ajino v5</h1>
-    <p>Private Executive Intelligence Platform</p>
-    <div class="status">Dang tai ung dung...</div>
-  </div>
-  <script>
-    var tg = window.Telegram?.WebApp;
-    if (tg) { tg.ready(); tg.expand(); }
-  </script>
+  <div id="root"></div>
 </body>
-</html>`,
-    200,
-  );
+</html>`);
 });
 
 export default app;

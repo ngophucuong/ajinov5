@@ -12,6 +12,19 @@ import type {
 } from "./types";
 import { getToken } from "./auth";
 
+// ─── Non-JSON fetch helper (for FormData) ──────────────
+async function fetchToken(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    ...((init.headers as Record<string, string>) || {}),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return fetch(path, { ...init, headers, credentials: "include" });
+}
+
 // ─── Base request helper ──────────────────────────────
 async function request<T>(
   method: string,
@@ -42,8 +55,13 @@ export async function getSessions(): Promise<ChatSession[]> {
   return request<ChatSession[]>("GET", "/api/chat/sessions");
 }
 
-export async function getSessionMessages(sessionId: string): Promise<ChatMessage[]> {
-  return request<ChatMessage[]>("GET", `/api/chat/sessions/${sessionId}/messages`);
+export async function getSessionMessages(
+  sessionId: string,
+): Promise<ChatMessage[]> {
+  return request<ChatMessage[]>(
+    "GET",
+    `/api/chat/sessions/${sessionId}/messages`,
+  );
 }
 
 export async function sendMessage(
@@ -51,10 +69,14 @@ export async function sendMessage(
   content: string,
   reasoningMode: ReasoningMode,
 ): Promise<{ session_id: string }> {
-  return request<{ session_id: string }>("POST", `/api/chat/sessions/${sessionId}/messages`, {
-    content,
-    reasoning_mode: reasoningMode,
-  });
+  return request<{ session_id: string }>(
+    "POST",
+    `/api/chat/sessions/${sessionId}/messages`,
+    {
+      content,
+      reasoning_mode: reasoningMode,
+    },
+  );
 }
 
 // ─── Memory ───────────────────────────────────────────
@@ -105,7 +127,9 @@ export async function createCapture(data: {
   return request("POST", "/api/capture", data);
 }
 
-export async function commitCapture(id: string): Promise<{ memory_ids: string[] }> {
+export async function commitCapture(
+  id: string,
+): Promise<{ memory_ids: string[] }> {
   return request("POST", `/api/capture/${id}/commit`);
 }
 
@@ -128,7 +152,9 @@ export async function updateDocument(
   return request("PUT", `/api/studio/documents/${id}`, data);
 }
 
-export async function compileDocument(id: string): Promise<{ memory_ids: string[]; count: number }> {
+export async function compileDocument(
+  id: string,
+): Promise<{ memory_ids: string[]; count: number }> {
   return request("POST", `/api/studio/documents/${id}/compile`);
 }
 
@@ -136,9 +162,42 @@ export async function deleteDocument(id: string): Promise<null> {
   return request("DELETE", `/api/studio/documents/${id}`);
 }
 
+export async function uploadDocument(
+  file: File,
+  title?: string,
+): Promise<{ id: string; title: string; compile_status: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  if (title) form.append("title", title);
+
+  const res = await fetchToken("/api/studio/documents", {
+    method: "POST",
+    body: form,
+  });
+
+  const json: ApiResponse<{
+    id: string;
+    title: string;
+    compile_status: string;
+  }> = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error?.message || "Upload thất bại");
+  }
+  return json.data!;
+}
+
 // ─── Console ──────────────────────────────────────────
 export async function getAgents(): Promise<AgentStatus[]> {
   return request<AgentStatus[]>("GET", "/api/console/agents");
+}
+
+export async function updateSkill(
+  name: string,
+  enabled: boolean,
+): Promise<{ name: string; enabled: boolean }> {
+  return request("PATCH", `/api/console/skills/${encodeURIComponent(name)}`, {
+    enabled,
+  });
 }
 
 export async function getAudit(params?: {
@@ -150,11 +209,8 @@ export async function getAudit(params?: {
 }): Promise<AuditLogEntry[]> {
   const qs = new URLSearchParams();
   if (params?.limit) qs.set("limit", String(params.limit));
-  if (params?.offset) qs.set("offset", String(params.offset));
   if (params?.action) qs.set("action", params.action);
-  if (params?.from) qs.set("from", params.from);
-  if (params?.to) qs.set("to", params.to);
-  return request<AuditLogEntry[]>("GET", `/api/console/audit?${qs.toString()}`);
+  return request<AuditLogEntry[]>("GET", `/admin/audit?${qs.toString()}`);
 }
 
 export async function getSkills(): Promise<SkillStatus[]> {
@@ -162,7 +218,9 @@ export async function getSkills(): Promise<SkillStatus[]> {
 }
 
 // ─── Admin ────────────────────────────────────────────
-export async function bulkApproveMemory(ids: string[]): Promise<{ approved: number; failed: number }> {
+export async function bulkApproveMemory(
+  ids: string[],
+): Promise<{ approved: number; failed: number }> {
   return request("POST", "/admin/memory/bulk-approve", { ids });
 }
 
@@ -173,4 +231,38 @@ export async function getAdminSettings(): Promise<{
   pgvector_connected: boolean;
 }> {
   return request("GET", "/admin/settings");
+}
+
+export interface AdminMetrics {
+  canonical_count: number;
+  pending_count: number;
+  sessions_today: number;
+  tokens_today: number;
+  recent_audit: Array<{
+    id: string;
+    action: string;
+    resource: string;
+    model?: string;
+    tokens?: number;
+    created_at: string;
+  }>;
+}
+
+export async function getAdminMetrics(): Promise<AdminMetrics> {
+  return request<AdminMetrics>("GET", "/api/admin/metrics");
+}
+
+export async function getAdminAudit(cursor?: string): Promise<{
+  entries: AuditLogEntry[];
+  next_cursor: string | null;
+}> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return request("GET", `/admin/audit${qs}`);
+}
+
+export function getAuditExportUrl(from?: string, to?: string): string {
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  return `/admin/audit/export?${qs.toString()}`;
 }

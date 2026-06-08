@@ -55,6 +55,41 @@ export interface ThinkingTraceStep {
 
 export type ReasoningMode = "auto" | "fast" | "deep";
 
+// ─── Deep Research ──────────────────────────────────
+export interface ResearchPlanEvent {
+  event: "plan";
+  questions: string[];
+}
+
+export interface ResearchProgressEvent {
+  event: "progress";
+  step: "planning" | "researching" | "compiling";
+  message?: string;
+  question?: string;
+  index?: number;
+  total?: number;
+}
+
+export interface ResearchDoneEvent {
+  event: "done";
+  doc_id: string;
+  title: string;
+  word_count: number;
+  question_count: number;
+}
+
+export interface ResearchErrorEvent {
+  event: "error";
+  message: string;
+}
+
+export type ResearchSSEEvent =
+  | { event: "start" }
+  | ResearchPlanEvent
+  | ResearchProgressEvent
+  | ResearchDoneEvent
+  | ResearchErrorEvent;
+
 // ─── Memory ──────────────────────────────────────────
 export interface MemoryItem {
   id: string;

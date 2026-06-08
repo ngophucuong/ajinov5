@@ -62,6 +62,7 @@ async def run_pipeline(
     litellm_api_key: str = "",
     serper_key: str = "",
     db_pool=None,
+    telegram_id: str = None,
 ) -> dict:
     """
     Full chat pipeline:
@@ -165,6 +166,24 @@ async def run_pipeline(
             }
         )
 
+    # Stage 3.5: Telegram context assembly (if applicable)
+    telegram_context = None
+    if telegram_id and db_pool:
+        from .context_assembly import assemble_telegram_context
+
+        print(
+            f"[orchestrator] Stage 3.5: assembling Telegram context for {telegram_id}"
+        )
+        try:
+            telegram_context = await assemble_telegram_context(
+                telegram_id, message, db_pool
+            )
+            print(
+                f"[orchestrator] context assembly result: stbuf={telegram_context.get('stbuf_count')}, msgs={len(telegram_context.get('messages', []))}, canonical={telegram_context.get('canonical_count')}"
+            )
+        except Exception as e:
+            print(f"Context assembly error: {e}")
+
     # Stage 4: Synthesis
     t3 = time.time()
     from .synthesis import synthesize
@@ -177,6 +196,7 @@ async def run_pipeline(
         model=model,
         litellm_url=litellm_url,
         litellm_api_key=litellm_api_key,
+        telegram_context=telegram_context,
     )
 
     thinking_trace.append(

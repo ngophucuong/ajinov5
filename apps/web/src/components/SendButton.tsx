@@ -34,6 +34,7 @@ export default function SendButton({ onClick, disabled, loading }: Props) {
       <button
         onClick={onClick}
         disabled={disabled || loading}
+        title="Gửi tin nhắn"
         className="absolute inset-0 rounded-full border-none flex items-center justify-center cursor-pointer text-[20px] z-[1] transition-all duration-200 text-[#030e0a] disabled:opacity-50"
         style={{
           background: "linear-gradient(140deg, #00c8a4 0%, #0094d4 100%)",

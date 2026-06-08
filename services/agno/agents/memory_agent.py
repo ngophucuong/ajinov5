@@ -431,17 +431,33 @@ async def edit_memory_content(
 
 async def list_memories(
     status: Optional[str] = None,
+    source_ref: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
     db_pool: Optional[asyncpg.Pool] = None,
 ) -> list[dict]:
-    """List memories with optional status filter."""
+    """List memories with optional status and source_ref filters."""
     if not db_pool:
         return []
 
     try:
         async with db_pool.acquire() as conn:
-            if status:
+            if status and source_ref:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, content, status, source, source_ref, approved_at,
+                           created_at
+                    FROM memory
+                    WHERE status = $1 AND source_ref = $4::uuid
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    status,
+                    limit,
+                    offset,
+                    source_ref,
+                )
+            elif status:
                 rows = await conn.fetch(
                     """
                     SELECT id, content, status, source, source_ref, approved_at,

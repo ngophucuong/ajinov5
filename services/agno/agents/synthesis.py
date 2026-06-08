@@ -19,6 +19,7 @@ async def synthesize(
     litellm_url: str,
     litellm_api_key: str = "",
     memory_context: str = "",
+    telegram_context: dict = None,
 ) -> dict:
     """Generate final response with context."""
     context = ""
@@ -31,7 +32,17 @@ async def synthesize(
     if memory_context:
         context += f"\n{memory_context}"
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # Inject Telegram context if available
+    messages = []
+    if telegram_context:
+        ctx_system = telegram_context.get("system", "")
+        if ctx_system:
+            messages.append({"role": "system", "content": ctx_system})
+        # Add recent messages as conversation history
+        for msg in telegram_context.get("messages", [])[-8:]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    else:
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
     if context:
         messages.append({"role": "system", "content": f"Dữ liệu tham khảo:\n{context}"})

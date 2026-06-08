@@ -8,6 +8,8 @@ interface Props {
   }>;
   memories?: MemoryItem[];
   onReviewMemory?: () => void;
+  onMemoryClick?: (id: string) => void;
+  onEntityClick?: (entity: string) => void;
 }
 
 // ─── Skill dot ───────────────────────────────────────
@@ -18,10 +20,18 @@ function SkillDot({ status }: { status: "active" | "used" | "off" }) {
       : status === "used"
         ? "bg-[#d4a05a]"
         : "border border-[rgba(255,255,255,0.05)] bg-transparent";
-  return <div className={`w-[5px] h-[5px] rounded-full flex-shrink-0 ${color}`} />;
+  return (
+    <div className={`w-[5px] h-[5px] rounded-full flex-shrink-0 ${color}`} />
+  );
 }
 
-export default function ContextPanel({ skills, memories, onReviewMemory }: Props) {
+export default function ContextPanel({
+  skills,
+  memories,
+  onReviewMemory,
+  onMemoryClick,
+  onEntityClick,
+}: Props) {
   return (
     <div className="flex-1 overflow-y-auto py-[10px] flex flex-col">
       {/* Skills section */}
@@ -38,12 +48,18 @@ export default function ContextPanel({ skills, memories, onReviewMemory }: Props
           <div
             key={i}
             className={`flex items-center gap-[7px] py-[5px] ${
-              i < skills.length - 1 ? "border-b border-[rgba(255,255,255,0.05)]" : ""
+              i < skills.length - 1
+                ? "border-b border-[rgba(255,255,255,0.05)]"
+                : ""
             }`}
           >
             <SkillDot status={skill.status} />
-            <span className="flex-1 text-[11.5px] text-[#dde2ec]">{skill.name}</span>
-            <span className="font-mono text-[9px] text-[#52586a]">{skill.stat || "—"}</span>
+            <span className="flex-1 text-[11.5px] text-[#dde2ec]">
+              {skill.name}
+            </span>
+            <span className="font-mono text-[9px] text-[#52586a]">
+              {skill.stat || "—"}
+            </span>
           </div>
         ))}
       </div>
@@ -71,8 +87,11 @@ export default function ContextPanel({ skills, memories, onReviewMemory }: Props
             {memories.map((mem, i) => (
               <div
                 key={mem.id || i}
+                onClick={() => onMemoryClick?.(mem.id)}
                 className={`py-[7px] cursor-pointer flex flex-col gap-[3px] ${
-                  i < memories.length - 1 ? "border-b border-[rgba(255,255,255,0.05)]" : ""
+                  i < memories.length - 1
+                    ? "border-b border-[rgba(255,255,255,0.05)]"
+                    : ""
                 }`}
               >
                 <span
@@ -101,13 +120,22 @@ export default function ContextPanel({ skills, memories, onReviewMemory }: Props
           Thực thể
         </span>
         <div className="flex flex-wrap gap-1">
-          <span className="inline-flex items-center gap-[3px] px-[7px] py-[3px] rounded text-[10px] bg-[#12161f] border border-[rgba(255,255,255,0.05)] text-[#52586a] cursor-pointer hover:border-[rgba(255,255,255,0.09)] hover:text-[#dde2ec] transition-colors">
+          <span
+            onClick={() => onEntityClick?.("SF Express")}
+            className="inline-flex items-center gap-[3px] px-[7px] py-[3px] rounded text-[10px] bg-[#12161f] border border-[rgba(255,255,255,0.05)] text-[#52586a] cursor-pointer hover:border-[rgba(255,255,255,0.09)] hover:text-[#dde2ec] transition-colors"
+          >
             🏢 SF Express
           </span>
-          <span className="inline-flex items-center gap-[3px] px-[7px] py-[3px] rounded text-[10px] bg-[#12161f] border border-[rgba(255,255,255,0.05)] text-[#52586a] cursor-pointer hover:border-[rgba(255,255,255,0.09)] hover:text-[#dde2ec] transition-colors">
+          <span
+            onClick={() => onEntityClick?.("Viettel Post")}
+            className="inline-flex items-center gap-[3px] px-[7px] py-[3px] rounded text-[10px] bg-[#12161f] border border-[rgba(255,255,255,0.05)] text-[#52586a] cursor-pointer hover:border-[rgba(255,255,255,0.09)] hover:text-[#dde2ec] transition-colors"
+          >
             🏢 Viettel Post
           </span>
-          <span className="inline-flex items-center gap-[3px] px-[7px] py-[3px] rounded text-[10px] bg-[#12161f] border border-[rgba(255,255,255,0.05)] text-[#52586a] cursor-pointer hover:border-[rgba(255,255,255,0.09)] hover:text-[#dde2ec] transition-colors">
+          <span
+            onClick={() => onEntityClick?.("Lạng Sơn")}
+            className="inline-flex items-center gap-[3px] px-[7px] py-[3px] rounded text-[10px] bg-[#12161f] border border-[rgba(255,255,255,0.05)] text-[#52586a] cursor-pointer hover:border-[rgba(255,255,255,0.09)] hover:text-[#dde2ec] transition-colors"
+          >
             📍 Lạng Sơn
           </span>
         </div>

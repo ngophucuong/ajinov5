@@ -20,9 +20,11 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   user_id    UUID NOT NULL REFERENCES users(id),
   title      TEXT,
   tags       TEXT[] DEFAULT '{}',
+  metadata   JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_telegram ON chat_sessions ((metadata->>'telegram_id')) WHERE metadata->>'surface' = 'telegram';
 
 -- ─── chat_messages ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -116,3 +118,15 @@ INSERT INTO skills (name, description) VALUES
   ('memory_retrieval', 'pgvector hybrid vector+keyword search'),
   ('report_generator', 'Generate structured reports from facts')
 ON CONFLICT (name) DO NOTHING;
+
+-- ─── reminders ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS reminders (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID REFERENCES users(id),
+  telegram_id BIGINT NOT NULL,
+  content     TEXT NOT NULL,
+  remind_at   TIMESTAMPTZ NOT NULL,
+  notified_at TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders (remind_at) WHERE notified_at IS NULL;
