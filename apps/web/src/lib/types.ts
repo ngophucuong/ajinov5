@@ -216,12 +216,13 @@ export interface CaptureItem {
 // ─── Studio ──────────────────────────────────────────
 export interface StudioDocument {
   id: string;
-  user_id: string;
+  user_id?: string;
   title: string;
   content: string;
   r2_key?: string;
   compile_status: "draft" | "compiling" | "compiled" | "failed";
   memory_ids?: string[];
+  metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }

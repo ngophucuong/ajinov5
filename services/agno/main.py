@@ -1723,25 +1723,68 @@ async def update_document(doc_id: str, request: dict):
     """
     PUT /studio/documents/{id} — Update document title or content.
     """
+    pool = await get_pool()
     title = request.get("title")
     content = request.get("content")
     if not title and not content:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
-    pool = await get_pool()
-    if title:
+    row = await pool.fetchrow(
+        "SELECT id, title, content, compile_status FROM studio_documents "
+        "WHERE id = $1 AND deleted_at IS NULL",
+        doc_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    next_title = (title or row["title"]).strip()[:200]
+    next_content = content if content is not None else row["content"]
+    content_changed = content is not None and content != row["content"]
+    next_status = "draft" if content_changed else row["compile_status"]
+    next_memory_ids = [] if content_changed else None
+
+    if content_changed:
         await pool.execute(
-            "UPDATE studio_documents SET title = $1, updated_at = now() WHERE id = $2",
-            title[:200],
+            "UPDATE studio_documents SET title = $1, content = $2, compile_status = $3, "
+            "memory_ids = $4, updated_at = now() WHERE id = $5",
+            next_title,
+            next_content,
+            next_status,
+            next_memory_ids,
             doc_id,
         )
-    if content:
+    else:
         await pool.execute(
-            "UPDATE studio_documents SET content = $1, updated_at = now() WHERE id = $2",
-            content,
+            "UPDATE studio_documents SET title = $1, content = $2, updated_at = now() "
+            "WHERE id = $3",
+            next_title,
+            next_content,
             doc_id,
         )
-    return {"data": {"id": doc_id, "updated": True}}
+
+    try:
+        await pool.execute(
+            "INSERT INTO audit_log (action, resource_type, resource_id, payload) "
+            "VALUES ('studio.update', 'studio_document', $1, $2)",
+            doc_id,
+            json.dumps(
+                {
+                    "content_changed": content_changed,
+                    "compile_status": next_status,
+                    "title": next_title,
+                }
+            ),
+        )
+    except Exception:
+        pass
+
+    return {
+        "data": {
+            "id": doc_id,
+            "updated": True,
+            "compile_status": next_status,
+        }
+    }
 
 
 @app.delete("/studio/documents/{doc_id}")
@@ -1758,10 +1801,11 @@ async def delete_document(doc_id: str):
 
 
 @app.post("/studio/documents/{doc_id}/compile")
-async def compile_document(doc_id: str, request: dict):
+async def compile_document(doc_id: str, request: dict | None = None):
     """Compile document into memory with smart chunking."""
     pool = await get_pool()
-    user_ref = request.get("user_id", "1")
+    payload = request or {}
+    user_ref = payload.get("user_id")
 
     row = await pool.fetchrow(
         "SELECT id, title, content, compile_status FROM studio_documents WHERE id = $1",

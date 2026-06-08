@@ -18,6 +18,7 @@ import {
   deleteSession,
   getSessions,
   getSessionMessages,
+  getDocument,
   startResearchV2,
 } from "../lib/api";
 import AgentNetwork from "../components/AgentNetwork";
@@ -1041,29 +1042,38 @@ export default function Chat() {
                 <ResearchPanel
                   jobId={researchJobId}
                   onClose={() => setResearchJobId(null)}
-                  onDone={(title, content, sectionCount) => {
-                    // Add research result as chat messages with thinking trace
-                    const userMsg: UIMessage = {
-                      id: crypto.randomUUID(),
-                      role: "user",
-                      content: `🔬 Nghiên cứu sâu: ${title}`,
-                    };
-                    const assistantMsg: UIMessage = {
-                      id: crypto.randomUUID(),
-                      role: "assistant",
-                      content,
-                      reasoningMode: "deep",
-                      trace: [
-                        {
-                          step: 1,
-                          agent: "Deep Research",
-                          status: "done",
-                          duration_ms: 0,
-                          result: `${sectionCount} sections · đã lưu vào Studio`,
-                        },
-                      ],
-                    };
-                    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+                  onDone={(title, content, sectionCount, documentId) => {
+                    void (async () => {
+                      let finalContent = content;
+                      if (documentId) {
+                        try {
+                          const doc = await getDocument(documentId);
+                          if (doc.content?.trim()) {
+                            finalContent = doc.content;
+                          }
+                        } catch {
+                          // fall back to in-memory section content
+                        }
+                      }
+
+                      const userMsg: UIMessage = {
+                        id: crypto.randomUUID(),
+                        role: "user",
+                        content: `🔬 Nghiên cứu sâu: ${title}`,
+                      };
+                      const assistantMsg: UIMessage = {
+                        id: crypto.randomUUID(),
+                        role: "assistant",
+                        content:
+                          `${finalContent}\n\n` +
+                          `> Báo cáo gồm ${sectionCount} phần và đã được lưu vào Studio` +
+                          (documentId ? ` (#${documentId.slice(0, 8)})` : "") +
+                          `. Anh có thể mở Studio để đọc, sửa và compile thành bộ nhớ.`,
+                        reasoningMode: "deep",
+                      };
+                      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+                      setResearchJobId(null);
+                    })();
                   }}
                 />
               </div>

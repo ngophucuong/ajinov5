@@ -178,6 +178,10 @@ export async function getDocuments(): Promise<StudioDocument[]> {
   return request<StudioDocument[]>("GET", "/api/studio/documents");
 }
 
+export async function getDocument(id: string): Promise<StudioDocument> {
+  return request<StudioDocument>("GET", `/api/studio/documents/${id}`);
+}
+
 export async function createDocument(data: {
   title: string;
   content: string;
@@ -195,7 +199,7 @@ export async function updateDocument(
 export async function compileDocument(
   id: string,
 ): Promise<{ memory_ids: string[]; count: number }> {
-  return request("POST", `/api/studio/documents/${id}/compile`);
+  return request("POST", `/api/studio/documents/${id}/compile`, {});
 }
 
 export async function deleteDocument(id: string): Promise<null> {

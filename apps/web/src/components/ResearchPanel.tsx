@@ -12,7 +12,12 @@ import { IconFileText } from "@tabler/icons-react";
 interface Props {
   jobId: string;
   onClose: () => void;
-  onDone?: (title: string, content: string, sectionCount: number) => void;
+  onDone?: (
+    title: string,
+    content: string,
+    sectionCount: number,
+    documentId: string | null,
+  ) => void;
 }
 
 const C = {
@@ -287,12 +292,11 @@ export default function ResearchPanel({ jobId, onClose, onDone }: Props) {
       const data = await getResearchStatus(jobId);
       setJob(data);
 
-      // Auto-expand newly done sections
       if (data.sections) {
         setExpandedSections((prev) => {
           const next = new Set(prev);
-          for (const s of data.sections) {
-            if (s.status === "done") next.add(s.id);
+          for (const section of data.sections) {
+            if (section.status === "done") next.add(section.id);
           }
           return next;
         });
@@ -312,13 +316,14 @@ export default function ResearchPanel({ jobId, onClose, onDone }: Props) {
             data.plan_title || "Nghiên cứu sâu",
             fullContent,
             data.sections?.length || 0,
+            data.document_id,
           );
         }
       }
     } catch {
       // ignore
     }
-  }, [jobId]);
+  }, [jobId, onDone]);
 
   useEffect(() => {
     poll();
@@ -477,22 +482,27 @@ export default function ResearchPanel({ jobId, onClose, onDone }: Props) {
           </div>
         )}
 
-        {/* Sections */}
         {job.sections && job.sections.length > 0 && (
           <div className="flex flex-col gap-[6px]">
-            {job.sections.map((s) => (
+            <div
+              className="font-mono text-[9px] uppercase tracking-[.1em]"
+              style={{ color: C.mu }}
+            >
+              Nội dung đang tổng hợp
+            </div>
+            {job.sections.map((section) => (
               <SectionCard
-                key={s.id}
-                id={s.id}
-                title={s.title}
-                status={s.status}
-                content={s.content}
-                expanded={expandedSections.has(s.id)}
+                key={section.id}
+                id={section.id}
+                title={section.title}
+                status={section.status}
+                content={section.content}
+                expanded={expandedSections.has(section.id)}
                 onToggle={() =>
                   setExpandedSections((prev) => {
                     const next = new Set(prev);
-                    if (next.has(s.id)) next.delete(s.id);
-                    else next.add(s.id);
+                    if (next.has(section.id)) next.delete(section.id);
+                    else next.add(section.id);
                     return next;
                   })
                 }
@@ -524,7 +534,13 @@ export default function ResearchPanel({ jobId, onClose, onDone }: Props) {
               </span>
             </div>
             <button
-              onClick={() => navigate("/studio")}
+              onClick={() =>
+                navigate(
+                  job.document_id
+                    ? `/studio?doc=${encodeURIComponent(job.document_id)}`
+                    : "/studio",
+                )
+              }
               className="flex items-center gap-[5px] px-[10px] py-[6px] rounded-[7px] cursor-pointer border-none text-[11px] font-mono transition-all"
               style={{ background: "rgba(139,114,240,0.15)", color: C.pu }}
             >
