@@ -551,7 +551,7 @@ app.notFound(async (c: Context<{ Bindings: Bindings }>) => {
   <title>Ajino v5</title>
   <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600&family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script type="module" crossorigin src="/assets/index-BjoiXto4.js"></script>
+  <script type="module" crossorigin src="/assets/index-DKqtDFKJ.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-DLUgSoR5.css">
 </head>
 <body>
