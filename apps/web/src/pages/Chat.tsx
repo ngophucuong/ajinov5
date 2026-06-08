@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getToken, requestOTP, verifyOTP, logout, setToken } from "../lib/auth";
 import type {
+  SSEEvent,
   ThinkingTraceStep,
   ReasoningMode,
   MemoryItem,
@@ -448,11 +449,28 @@ export default function Chat() {
     let responseContent = "";
     const startTime = Date.now();
 
-    // Try real SSE first, fall back to simulation
+    const failClosed = (message: string) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsg.id
+            ? {
+                ...m,
+                isStreaming: false,
+                content: `⚠️ ${message}`,
+                trace: traceSteps.length > 0 ? traceSteps : undefined,
+                elapsedMs: Date.now() - startTime,
+              }
+            : m,
+        ),
+      );
+      setStreaming(false);
+      flash(message);
+    };
+
+    // Real SSE only. No mock fallback.
     try {
-      // Try creating a session and streaming
-      const sessionId = await createSessionAndStream(content, mode, {
-        onTrace: (event) => {
+      const streamCallbacks = {
+        onTrace: (event: SSEEvent & { event: "trace" }) => {
           traceSteps.push(event.data);
           setMessages((prev) =>
             prev.map((m) =>
@@ -466,7 +484,7 @@ export default function Chat() {
             ),
           );
         },
-        onToken: (delta) => {
+        onToken: (delta: string) => {
           responseContent += delta;
           setMessages((prev) =>
             prev.map((m) =>
@@ -480,7 +498,10 @@ export default function Chat() {
             ),
           );
         },
-        onDone: (_messageId, _candidates) => {
+        onDone: (
+          _messageId: string,
+          _candidates: Array<{ content: string; confidence: number }>,
+        ) => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsg.id
@@ -496,103 +517,39 @@ export default function Chat() {
           );
           setStreaming(false);
         },
-        onError: (_code, _msg) => {
-          // Fall back to simulation
-          simulateResponse(content, mode, assistantMsg.id, startTime);
+        onError: (_code: string, msg: string) => {
+          failClosed(msg || "Không thể nhận phản hồi từ hệ thống");
         },
-      });
-    } catch {
-      simulateResponse(content, mode, assistantMsg.id, startTime);
-    }
-  }, [input, mode, streaming]);
+      };
 
-  // Simulation fallback
-  const simulateResponse = (
-    query: string,
-    rmode: ReasoningMode,
-    msgId: string,
-    startTime: number,
-  ) => {
-    const steps: ThinkingTraceStep[] = [
-      {
-        step: 1,
-        agent: "Decompose",
-        status: "done",
-        duration_ms: 120,
-        result: "Phân tích yêu cầu...",
-      },
-      {
-        step: 2,
-        agent: "Memory search",
-        status: "done",
-        duration_ms: 280,
-        result: "Tìm kiếm bộ nhớ liên quan...",
-      },
-      {
-        step: 3,
-        agent: "Serper",
-        status: "done",
-        duration_ms: rmode === "deep" ? 750 : 350,
-        result: "Tìm kiếm web...",
-      },
-      {
-        step: 4,
-        agent: "Synthesis",
-        status: "done",
-        duration_ms: 420,
-        result:
-          rmode === "deep"
-            ? "DeepSeek V4 Pro · phân tích chuyên sâu"
-            : "DeepSeek V3 Flash · phản hồi nhanh",
-      },
-    ];
-
-    const resp =
-      rmode === "deep"
-        ? `**Phân tích chuyên sâu — ${query.slice(0, 40)}...**\n\nDựa trên dữ liệu hiện có và tìm kiếm web, tôi phân tích như sau:\n\n1. **Xu hướng thị trường**: Các chỉ số cho thấy sự dịch chuyển mạnh từ Q2 sang Q3.\n2. **Rủi ro chính**: Biến động tỷ giá và chính sách thương mại mới.\n3. **Khuyến nghị**: Ưu tiên đa dạng hóa chuỗi cung ứng trong Q4.`
-        : `**Phản hồi nhanh**\n\n${query.slice(0, 60)}... — đây là phân tích sơ bộ dựa trên dữ liệu sẵn có. Để có phân tích chuyên sâu hơn, hãy chuyển sang chế độ Deep.`;
-
-    let content = "";
-    const words = resp.split(" ");
-    let i = 0;
-    const interval = setInterval(() => {
-      if (i < words.length) {
-        content += (i > 0 ? " " : "") + words[i];
-        i++;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === msgId
-              ? {
-                  ...m,
-                  content,
-                  trace:
-                    i >= words.length
-                      ? steps
-                      : steps.slice(0, -1).map((s) => ({ ...s })),
-                  elapsedMs: Date.now() - startTime,
-                }
-              : m,
-          ),
-        );
+      if (activeSessionId) {
+        await streamChatMessage(activeSessionId, content, mode, streamCallbacks);
       } else {
-        clearInterval(interval);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === msgId
-              ? {
-                  ...m,
-                  isStreaming: false,
-                  content,
-                  trace: steps,
-                  elapsedMs: Date.now() - startTime,
-                }
-              : m,
-          ),
+        const sessionId = await createSessionAndStream(
+          content,
+          mode,
+          streamCallbacks,
         );
-        setStreaming(false);
+        setActiveSessionId(sessionId);
+        setSessions((prev) =>
+          prev.some((s) => s.id === sessionId)
+            ? prev
+            : [
+                {
+                  id: sessionId,
+                  title: content.slice(0, 40) || "Cuộc trò chuyện mới",
+                  time: "bây giờ",
+                },
+                ...prev,
+              ],
+        );
       }
-    }, 30);
-  };
+    } catch (err) {
+      failClosed(
+        err instanceof Error ? err.message : "Không thể gửi tin nhắn lúc này",
+      );
+    }
+  }, [activeSessionId, input, mode, streaming]);
 
   async function handleStartResearch(topic: string) {
     try {

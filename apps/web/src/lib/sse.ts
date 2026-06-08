@@ -24,7 +24,7 @@ export async function streamChatMessage(
     return;
   }
 
-  const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+  const res = await fetch("/api/chat/stream", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -33,6 +33,8 @@ export async function streamChatMessage(
     body: JSON.stringify({
       content,
       reasoning_mode: reasoningMode,
+      session_id: sessionId,
+      surface: "web",
     }),
   });
 
@@ -60,35 +62,46 @@ export async function streamChatMessage(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() || "";
 
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const dataStr = line.slice(6).trim();
-        if (!dataStr) continue;
+      for (const chunk of chunks) {
+        const lines = chunk.split("\n");
+        let eventType = "message";
+        const dataParts: string[] = [];
 
-        try {
-          const event = JSON.parse(dataStr) as SSEEvent;
-          switch (event.event) {
-            case "trace":
-              callbacks.onTrace(event as SSEEvent & { event: "trace" });
-              break;
-            case "token":
-              callbacks.onToken(event.data.delta);
-              break;
-            case "done":
-              callbacks.onDone(
-                event.data.message_id,
-                event.data.memory_candidates,
-              );
-              break;
-            case "error":
-              callbacks.onError(event.data.code, event.data.message);
-              break;
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            dataParts.push(line.slice(5).trim());
           }
-        } catch {
-          // Skip unparseable lines
+        }
+
+        const dataStr = dataParts.join("\n").trim();
+        const payload = dataStr ? JSON.parse(dataStr) : {};
+
+        switch (eventType) {
+          case "trace":
+            callbacks.onTrace({
+              event: "trace",
+              data: payload,
+            } as SSEEvent & { event: "trace" });
+            break;
+          case "token":
+            callbacks.onToken(payload.delta || "");
+            break;
+          case "done":
+            callbacks.onDone(
+              payload.message_id || "",
+              payload.memory_candidates || [],
+            );
+            break;
+          case "error":
+            callbacks.onError(payload.code || "CHAT_002", payload.message || "LLM_ERROR");
+            break;
+          default:
+            break;
         }
       }
     }
@@ -119,8 +132,7 @@ export async function createSessionAndStream(
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      first_message: firstMessage,
-      reasoning_mode: reasoningMode,
+      title: firstMessage.slice(0, 80),
     }),
   });
 
@@ -133,7 +145,8 @@ export async function createSessionAndStream(
     throw new Error(body.error?.message || "Failed to create session");
   }
 
-  const sessionId = body.data.session_id;
+  const sessionId = body.data.id;
+  void streamChatMessage(sessionId, firstMessage, reasoningMode, callbacks);
   return sessionId;
 }
 
