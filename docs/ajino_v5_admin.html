@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ajino v5 — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600&family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden}
+:root{
+--bg:#0a0906;--s1:#100e0a;--s2:#181410;--s3:#201c16;
+--b1:rgba(255,255,255,0.05);--b2:rgba(255,255,255,0.09);--b3:rgba(255,255,255,0.15);
+--tx:#ede8df;--mu:#6b6358;
+--am:#c8842a;--am0:rgba(200,132,42,0.08);--am1:rgba(200,132,42,0.14);--am2:rgba(200,132,42,0.28);
+--gr:#4a8c5c;--gr0:rgba(74,140,92,0.08);--gr1:rgba(74,140,92,0.14);
+--re:#c45050;--re0:rgba(196,80,80,0.08);--re1:rgba(196,80,80,0.14);
+--pu:#7a62d4;--pu0:rgba(122,98,212,0.08);
+--fu:'DM Sans',sans-serif;--fl:'Exo 2',sans-serif;--fm:'JetBrains Mono',monospace
+}
+body{background:var(--bg);color:var(--tx);font-family:var(--fu);font-size:13px;line-height:1.6;display:flex;flex-direction:column;height:100vh}
+.topbar{height:46px;background:var(--s1);border-bottom:0.5px solid var(--b2);display:flex;align-items:center;padding:0 16px;gap:10px;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:8px}
+.logo-a{font-family:var(--fl);font-size:24px;font-weight:600;color:var(--am);line-height:1;letter-spacing:-0.03em}
+.logo-txt{display:flex;flex-direction:column;line-height:1;gap:2px}
+.logo-name{font-family:var(--fl);font-size:13px;font-weight:500;color:var(--tx);letter-spacing:0.05em}
+.logo-ver{font-family:var(--fm);font-size:8px;color:var(--mu);letter-spacing:0.12em}
+.logo-badge{font-family:var(--fm);font-size:8px;padding:2px 7px;border-radius:3px;background:var(--am1);color:var(--am);border:0.5px solid var(--am2);letter-spacing:0.08em;text-transform:uppercase}
+.tb-c{flex:1;display:flex;align-items:center;justify-content:center;gap:10px}
+.stat-pill{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:0.5px solid var(--b2);background:var(--s2)}
+.sp-dot{width:5px;height:5px;border-radius:50%;animation:dp 2.4s ease-in-out infinite}
+.sp-dot.am{background:var(--am)}
+.sp-dot.re{background:var(--re)}
+@keyframes dp{0%,100%{opacity:1}50%{opacity:0.3}}
+.sp-l{font-family:var(--fm);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--mu)}
+.sp-n{font-family:var(--fm);font-size:9px}
+.sp-n.am{color:var(--am)}
+.sp-n.re{color:var(--re)}
+.tb-r{margin-left:auto;display:flex;gap:4px;align-items:center}
+.ib{width:28px;height:28px;border-radius:6px;border:0.5px solid transparent;background:transparent;color:var(--mu);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;font-size:14px}
+.ib:hover{background:var(--s2);border-color:var(--b1);color:var(--tx)}
+.ceo-link{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:0.5px solid var(--b2);background:transparent;color:var(--mu);font-family:var(--fm);font-size:9px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .15s;text-decoration:none}
+.ceo-link:hover{background:var(--s2);color:var(--tx)}
+.main{flex:1;display:flex;overflow:hidden}
+.sidebar{width:200px;flex-shrink:0;background:var(--s1);border-right:0.5px solid var(--b1);display:flex;flex-direction:column;padding:10px 0}
+.nav-section{padding:4px 14px 2px;font-family:var(--fm);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--mu);opacity:.6;margin-top:8px}
+.nav-section:first-child{margin-top:0}
+.nav-item{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;border-left:2px solid transparent;transition:all .12s;font-size:12px;color:var(--mu)}
+.nav-item:hover{background:var(--am0);border-left-color:rgba(200,132,42,.3);color:var(--tx)}
+.nav-item.on{background:var(--am1);border-left-color:var(--am);color:var(--tx)}
+.nav-item i{font-size:15px;flex-shrink:0}
+.nav-badge{margin-left:auto;font-family:var(--fm);font-size:9px;padding:1px 6px;border-radius:3px;background:var(--re1);color:var(--re);border:0.5px solid rgba(196,80,80,.25)}
+.content{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.content-hd{height:46px;border-bottom:0.5px solid var(--b1);display:flex;align-items:center;padding:0 22px;gap:10px;flex-shrink:0;background:var(--s1)}
+.content-title{font-family:var(--fl);font-size:14px;font-weight:500;color:var(--tx)}
+.content-sub{font-family:var(--fm);font-size:9px;color:var(--mu);letter-spacing:.06em}
+.hd-actions{margin-left:auto;display:flex;gap:6px}
+.btn{display:flex;align-items:center;gap:5px;padding:5px 11px;border-radius:6px;border:0.5px solid var(--b2);background:transparent;color:var(--mu);font-family:var(--fm);font-size:10px;cursor:pointer;transition:all .15s;letter-spacing:.03em}
+.btn:hover{background:var(--s2);color:var(--tx)}
+.btn.primary{background:var(--am1);color:var(--am);border-color:var(--am2)}
+.btn.primary:hover{background:var(--am2)}
+.scroll{flex:1;overflow-y:auto;padding:18px 22px;display:flex;flex-direction:column;gap:14px}
+.scroll::-webkit-scrollbar{width:2px}
+.scroll::-webkit-scrollbar-thumb{background:var(--b2)}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.metric{background:var(--s1);border:0.5px solid var(--b1);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.metric-label{font-family:var(--fm);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--mu)}
+.metric-val{font-family:var(--fl);font-size:22px;font-weight:500;color:var(--tx);line-height:1}
+.metric-val.am{color:var(--am)}
+.metric-val.re{color:var(--re)}
+.metric-val.gr{color:var(--gr)}
+.metric-sub{font-family:var(--fm);font-size:9px;color:var(--mu)}
+.card{background:var(--s1);border:0.5px solid var(--b1);border-radius:8px;overflow:hidden}
+.card-hd{padding:10px 14px;border-bottom:0.5px solid var(--b1);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-family:var(--fm);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--am);opacity:.8}
+.card-action{font-family:var(--fm);font-size:9px;color:var(--mu);cursor:pointer;transition:color .12s}
+.card-action:hover{color:var(--tx)}
+.mem-row{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:0.5px solid var(--b1);transition:background .12s}
+.mem-row:last-child{border-bottom:none}
+.mem-row:hover{background:var(--am0)}
+.mem-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;margin-top:6px}
+.mem-dot.pending{background:var(--re);animation:dp 2s ease-in-out infinite}
+.mem-dot.canonical{background:var(--gr)}
+.mem-dot.archived{background:var(--mu)}
+.mem-content{flex:1;min-width:0}
+.mem-text{font-size:12px;color:var(--tx);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mem-meta{display:flex;gap:6px;align-items:center;margin-top:3px}
+.mem-tag{font-family:var(--fm);font-size:8px;padding:1px 5px;border-radius:3px}
+.mem-tag.pending{background:var(--re0);color:var(--re);border:0.5px solid rgba(196,80,80,.2)}
+.mem-tag.canonical{background:var(--gr0);color:var(--gr);border:0.5px solid rgba(74,140,92,.2)}
+.mem-tag.archived{background:var(--b1);color:var(--mu);border:0.5px solid var(--b2)}
+.mem-tag.domain{background:var(--am0);color:var(--am);border:0.5px solid rgba(200,132,42,.2)}
+.mem-time{font-family:var(--fm);font-size:8px;color:var(--mu)}
+.mem-actions{display:flex;gap:4px;flex-shrink:0;opacity:0;transition:opacity .15s}
+.mem-row:hover .mem-actions{opacity:1}
+.ma{width:26px;height:26px;border-radius:5px;border:0.5px solid var(--b2);background:transparent;color:var(--mu);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .12s;font-size:13px}
+.ma:hover{background:var(--s2);color:var(--tx)}
+.ma.approve:hover{background:var(--gr1);color:var(--gr);border-color:rgba(74,140,92,.3)}
+.ma.reject:hover{background:var(--re1);color:var(--re);border-color:rgba(196,80,80,.3)}
+.ma.edit:hover{background:var(--am1);color:var(--am);border-color:var(--am2)}
+.audit-row{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:0.5px solid var(--b1);font-family:var(--fm);font-size:10px}
+.audit-row:last-child{border-bottom:none}
+.audit-row:hover{background:var(--am0)}
+.audit-time{color:var(--mu);white-space:nowrap;min-width:72px}
+.audit-action{color:var(--am);white-space:nowrap;min-width:140px}
+.audit-res{color:var(--tx);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.audit-model{color:var(--pu);white-space:nowrap;margin-left:8px}
+.audit-tokens{color:var(--mu);white-space:nowrap;min-width:50px;text-align:right}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.agent-row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:0.5px solid var(--b1)}
+.agent-row:last-child{border-bottom:none}
+.agent-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.agent-dot.on{background:var(--gr);animation:dp 2s ease-in-out infinite}
+.agent-dot.idle{background:var(--b2)}
+.agent-name{font-size:12px;color:var(--tx);flex:1}
+.agent-calls{font-family:var(--fm);font-size:9px;color:var(--mu);margin-right:8px}
+.agent-bar-wrap{width:60px;height:3px;background:var(--b2);border-radius:2px;overflow:hidden}
+.agent-bar{height:100%;border-radius:2px;background:var(--am)}
+.skill-row{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:0.5px solid var(--b1)}
+.skill-row:last-child{border-bottom:none}
+.sk-toggle{width:28px;height:16px;border-radius:8px;border:0.5px solid var(--b2);background:var(--s2);position:relative;cursor:pointer;transition:all .2s;flex-shrink:0}
+.sk-toggle.on{background:var(--am1);border-color:var(--am2)}
+.sk-toggle::after{content:'';position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:var(--mu);transition:all .2s}
+.sk-toggle.on::after{left:14px;background:var(--am)}
+.skill-name{font-size:12px;color:var(--tx);flex:1}
+.skill-ver{font-family:var(--fm);font-size:9px;color:var(--mu);margin-right:8px}
+.skill-count{font-family:var(--fm);font-size:9px;color:var(--am);min-width:40px;text-align:right}
+.studio-row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:0.5px solid var(--b1)}
+.studio-row:last-child{border-bottom:none}
+.st-icon{font-size:15px;color:var(--am);opacity:.7;flex-shrink:0}
+.st-name{font-size:12px;color:var(--tx);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-status{font-family:var(--fm);font-size:9px;padding:2px 6px;border-radius:3px;white-space:nowrap}
+.st-status.draft{background:var(--b1);color:var(--mu);border:0.5px solid var(--b2)}
+.st-status.compiled{background:var(--gr0);color:var(--gr);border:0.5px solid rgba(74,140,92,.2)}
+.st-status.compiling{background:var(--am0);color:var(--am);border:0.5px solid var(--am2)}
+.st-acts{display:flex;gap:4px;flex-shrink:0;margin-left:8px}
+.tab-bar{display:flex;border-bottom:0.5px solid var(--b1);flex-shrink:0}
+.tab{padding:8px 16px;font-family:var(--fm);font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--mu);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-0.5px;transition:all .12s}
+.tab:hover{color:var(--tx)}
+.tab.on{color:var(--am);border-bottom-color:var(--am)}
+.empty{padding:28px 14px;text-align:center;font-family:var(--fm);font-size:10px;color:var(--mu);letter-spacing:.06em}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <span class="logo-a">A</span>
+    <div class="logo-txt">
+      <span class="logo-name">Ajino</span>
+      <span class="logo-ver">v5 · Admin</span>
+    </div>
+    <span class="logo-badge">admin</span>
+  </div>
+  <div class="tb-c">
+    <div class="stat-pill"><div class="sp-dot am"></div><span class="sp-l">Pending</span><span class="sp-n am" id="pendingCount">10</span></div>
+    <div class="stat-pill"><div class="sp-dot re"></div><span class="sp-l">Alerts</span><span class="sp-n re">1</span></div>
+  </div>
+  <div class="tb-r">
+    <a class="ceo-link" href="/"><i class="ti ti-message-circle" style="font-size:13px" aria-hidden="true"></i>CEO UI</a>
+    <button class="ib" title="Cài đặt"><i class="ti ti-settings" aria-hidden="true"></i></button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="nav-section">Tổng quan</div>
+    <div class="nav-item on" onclick="showPage('dashboard',this)"><i class="ti ti-layout-dashboard" aria-hidden="true"></i>Dashboard</div>
+    <div class="nav-section">Tri thức</div>
+    <div class="nav-item" onclick="showPage('memory',this)"><i class="ti ti-brain" aria-hidden="true"></i>Memory Review<span class="nav-badge" id="memBadge">10</span></div>
+    <div class="nav-item" onclick="showPage('studio',this)"><i class="ti ti-books" aria-hidden="true"></i>Studio</div>
+    <div class="nav-section">Hệ thống</div>
+    <div class="nav-item" onclick="showPage('agents',this)"><i class="ti ti-robot" aria-hidden="true"></i>Agents</div>
+    <div class="nav-item" onclick="showPage('skills',this)"><i class="ti ti-plug" aria-hidden="true"></i>Skills</div>
+    <div class="nav-item" onclick="showPage('audit',this)"><i class="ti ti-shield-check" aria-hidden="true"></i>Audit Log</div>
+  </div>
+
+  <div class="content">
+
+    <div id="page-dashboard" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+      <div class="content-hd">
+        <span class="content-title">Dashboard</span>
+        <span class="content-sub">08/06/2026 — 14:32</span>
+      </div>
+      <div class="scroll">
+        <div class="metrics">
+          <div class="metric"><span class="metric-label">Memory canonical</span><span class="metric-val gr">11</span><span class="metric-sub">+2 hôm nay</span></div>
+          <div class="metric"><span class="metric-label">Pending review</span><span class="metric-val am" id="dm-pending">10</span><span class="metric-sub">chờ duyệt</span></div>
+          <div class="metric"><span class="metric-label">Chat sessions</span><span class="metric-val">2</span><span class="metric-sub">4 messages</span></div>
+          <div class="metric"><span class="metric-label">LLM tokens hôm nay</span><span class="metric-val">1,650</span><span class="metric-sub">flash + pro</span></div>
+        </div>
+        <div class="two-col">
+          <div class="card">
+            <div class="card-hd"><span class="card-title">Agents status</span><span class="card-action" onclick="showPage('agents',null)">xem chi tiết →</span></div>
+            <div class="agent-row"><div class="agent-dot on"></div><span class="agent-name">Orchestrator</span><span class="agent-calls">12 calls</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:90%"></div></div></div>
+            <div class="agent-row"><div class="agent-dot on"></div><span class="agent-name">Reasoning</span><span class="agent-calls">8 calls</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:65%"></div></div></div>
+            <div class="agent-row"><div class="agent-dot on"></div><span class="agent-name">Search</span><span class="agent-calls">5 calls</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:40%"></div></div></div>
+            <div class="agent-row"><div class="agent-dot idle"></div><span class="agent-name">Memory</span><span class="agent-calls">idle</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:0%"></div></div></div>
+            <div class="agent-row"><div class="agent-dot idle"></div><span class="agent-name">Knowledge</span><span class="agent-calls">idle</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:0%"></div></div></div>
+            <div class="agent-row"><div class="agent-dot on"></div><span class="agent-name">Synthesis</span><span class="agent-calls">3 calls</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:25%"></div></div></div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><span class="card-title">Audit log gần nhất</span><span class="card-action" onclick="showPage('audit',null)">xem tất cả →</span></div>
+            <div class="audit-row"><span class="audit-time">14:31:08</span><span class="audit-action">memory.approve</span><span class="audit-res">canonical +1</span><span class="audit-model"></span><span class="audit-tokens"></span></div>
+            <div class="audit-row"><span class="audit-time">14:20:44</span><span class="audit-action">chat.message</span><span class="audit-res">logistics Q3 — deep</span><span class="audit-model">v4-pro</span><span class="audit-tokens">1,364t</span></div>
+            <div class="audit-row"><span class="audit-time">13:58:12</span><span class="audit-action">memory.create</span><span class="audit-res">auto-extracted ×3</span><span class="audit-model"></span><span class="audit-tokens"></span></div>
+            <div class="audit-row"><span class="audit-time">11:15:03</span><span class="audit-action">chat.message</span><span class="audit-res">báo cáo tài chính</span><span class="audit-model">v4-flash</span><span class="audit-tokens">286t</span></div>
+            <div class="audit-row"><span class="audit-time">09:04:51</span><span class="audit-action">auth.otp_verify</span><span class="audit-res">JWT issued 24h</span><span class="audit-model"></span><span class="audit-tokens"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-memory" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div class="content-hd">
+        <span class="content-title">Memory Review</span>
+        <span class="content-sub" id="mem-sub">10 pending · 11 canonical · 1 archived</span>
+        <div class="hd-actions">
+          <button class="btn primary" onclick="bulkApprove()"><i class="ti ti-check" style="font-size:12px" aria-hidden="true"></i>Duyệt tất cả pending</button>
+          <button class="btn"><i class="ti ti-plus" style="font-size:12px" aria-hidden="true"></i>Thêm thủ công</button>
+        </div>
+      </div>
+      <div class="tab-bar">
+        <div class="tab on" onclick="filterMem('pending',this)">Pending <span id="pt">(10)</span></div>
+        <div class="tab" onclick="filterMem('canonical',this)">Canonical <span id="ct">(11)</span></div>
+        <div class="tab" onclick="filterMem('archived',this)">Archived <span id="at">(1)</span></div>
+      </div>
+      <div class="scroll" id="memList"></div>
+    </div>
+
+    <div id="page-studio" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div class="content-hd">
+        <span class="content-title">Studio</span>
+        <span class="content-sub">Biên tập và compile tài liệu thành canonical memory</span>
+        <div class="hd-actions"><button class="btn primary"><i class="ti ti-upload" style="font-size:12px" aria-hidden="true"></i>Upload Markdown</button></div>
+      </div>
+      <div class="scroll">
+        <div class="card">
+          <div class="card-hd"><span class="card-title">Tài liệu</span><span class="card-action">2 documents</span></div>
+          <div class="studio-row">
+            <i class="ti ti-file-text st-icon" aria-hidden="true"></i>
+            <span class="st-name">Nghiên cứu Chiến lược Phát triển Logistics Trung–Việt</span>
+            <span class="st-status draft" id="st1-status">draft</span>
+            <div class="st-acts">
+              <button class="ma edit" title="Sửa"><i class="ti ti-edit" aria-hidden="true"></i></button>
+              <button class="ma approve" title="Compile" onclick="compileDoc('st1-status')"><i class="ti ti-player-play" aria-hidden="true"></i></button>
+            </div>
+          </div>
+          <div class="studio-row">
+            <i class="ti ti-file-text st-icon" aria-hidden="true"></i>
+            <span class="st-name">8H Operations — Company Profile 2026</span>
+            <span class="st-status compiled">compiled</span>
+            <div class="st-acts">
+              <button class="ma edit" title="Sửa"><i class="ti ti-edit" aria-hidden="true"></i></button>
+              <button class="ma" title="Xem memory"><i class="ti ti-brain" aria-hidden="true"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-agents" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div class="content-hd">
+        <span class="content-title">Agents</span>
+        <span class="content-sub">4 active · 2 idle</span>
+        <div class="hd-actions"><button class="btn"><i class="ti ti-refresh" style="font-size:12px" aria-hidden="true"></i>Refresh</button></div>
+      </div>
+      <div class="scroll">
+        <div class="card">
+          <div class="card-hd"><span class="card-title">Agent network</span></div>
+          <div class="agent-row"><div class="agent-dot on"></div><span class="agent-name">Orchestrator</span><span class="agent-calls">12 calls · avg 1.2s</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:90%"></div></div></div>
+          <div class="agent-row"><div class="agent-dot on"></div><span class="agent-name">Reasoning</span><span class="agent-calls">8 calls · avg 3.4s</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:65%"></div></div></div>
+          <div class="agent-row"><div class="agent-dot on"></div><span class="agent-name">Search</span><span class="agent-calls">5 calls · Serper active</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:40%"></div></div></div>
+          <div class="agent-row"><div class="agent-dot idle"></div><span class="agent-name">Memory</span><span class="agent-calls">idle</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:0%"></div></div></div>
+          <div class="agent-row"><div class="agent-dot idle"></div><span class="agent-name">Knowledge</span><span class="agent-calls">idle</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:0%"></div></div></div>
+          <div class="agent-row"><div class="agent-dot on"></div><span class="agent-name">Synthesis</span><span class="agent-calls">3 calls · avg 18.2s</span><div class="agent-bar-wrap"><div class="agent-bar" style="width:25%"></div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-skills" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div class="content-hd">
+        <span class="content-title">Skills</span>
+        <span class="content-sub">5 skills · 4 enabled</span>
+      </div>
+      <div class="scroll">
+        <div class="card">
+          <div class="card-hd"><span class="card-title">Skill registry</span></div>
+          <div class="skill-row"><div class="sk-toggle on" onclick="this.classList.toggle('on')" title="Toggle"></div><span class="skill-name">web_search</span><span class="skill-ver">v1.0.0</span><span class="skill-count">5 calls</span></div>
+          <div class="skill-row"><div class="sk-toggle on" onclick="this.classList.toggle('on')" title="Toggle"></div><span class="skill-name">memory_retrieval</span><span class="skill-ver">v1.0.0</span><span class="skill-count">8 calls</span></div>
+          <div class="skill-row"><div class="sk-toggle on" onclick="this.classList.toggle('on')" title="Toggle"></div><span class="skill-name">report_generator</span><span class="skill-ver">v1.0.0</span><span class="skill-count">2 calls</span></div>
+          <div class="skill-row"><div class="sk-toggle on" onclick="this.classList.toggle('on')" title="Toggle"></div><span class="skill-name">competitive_intel</span><span class="skill-ver">v1.0.0</span><span class="skill-count">1 call</span></div>
+          <div class="skill-row"><div class="sk-toggle" onclick="this.classList.toggle('on')" title="Toggle"></div><span class="skill-name">capture_extractor</span><span class="skill-ver">v1.0.0</span><span class="skill-count">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-audit" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div class="content-hd">
+        <span class="content-title">Audit Log</span>
+        <span class="content-sub">Append-only · 14 entries hôm nay</span>
+        <div class="hd-actions"><button class="btn"><i class="ti ti-download" style="font-size:12px" aria-hidden="true"></i>Export CSV</button></div>
+      </div>
+      <div class="scroll">
+        <div class="card">
+          <div class="card-hd"><span class="card-title">08/06/2026</span><span class="card-action">14 entries</span></div>
+          <div class="audit-row"><span class="audit-time">14:31:08</span><span class="audit-action">memory.approve</span><span class="audit-res">id: b200…0006 → canonical</span><span class="audit-model"></span><span class="audit-tokens"></span></div>
+          <div class="audit-row"><span class="audit-time">14:20:44</span><span class="audit-action">chat.message</span><span class="audit-res">session: c100…0001 · deep mode</span><span class="audit-model">v4-pro</span><span class="audit-tokens">1,364t</span></div>
+          <div class="audit-row"><span class="audit-time">14:20:41</span><span class="audit-action">chat.message</span><span class="audit-res">decompose step</span><span class="audit-model">v4-flash</span><span class="audit-tokens">186t</span></div>
+          <div class="audit-row"><span class="audit-time">13:58:12</span><span class="audit-action">memory.create</span><span class="audit-res">source: chat · ×3 pending</span><span class="audit-model"></span><span class="audit-tokens"></span></div>
+          <div class="audit-row"><span class="audit-time">11:15:03</span><span class="audit-action">chat.message</span><span class="audit-res">session: c100…0002 · fast mode</span><span class="audit-model">v4-flash</span><span class="audit-tokens">286t</span></div>
+          <div class="audit-row"><span class="audit-time">11:14:58</span><span class="audit-action">memory.retrieval</span><span class="audit-res">7 canonical injected · bge-m3</span><span class="audit-model">bge-m3</span><span class="audit-tokens"></span></div>
+          <div class="audit-row"><span class="audit-time">09:04:51</span><span class="audit-action">auth.otp_verify</span><span class="audit-res">tg: 5250339472 · JWT 24h</span><span class="audit-model"></span><span class="audit-tokens"></span></div>
+          <div class="audit-row"><span class="audit-time">09:04:38</span><span class="audit-action">auth.otp_request</span><span class="audit-res">tg: 5250339472</span><span class="audit-model"></span><span class="audit-tokens"></span></div>
+          <div class="audit-row"><span class="audit-time">00:00:01</span><span class="audit-action">system.seed</span><span class="audit-res">11 memory · 5 skills</span><span class="audit-model"></span><span class="audit-tokens"></span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const memData={
+  pending:[
+    {id:'p1',content:'Viettel Post đang thử nghiệm AI customs declaration tại Lạng Sơn, dự kiến mở rộng Q4/2026.',domain:'logistics',time:'14:20'},
+    {id:'p2',content:'Sync gap trung bình tháng 6 là 42 phút, cao hơn mục tiêu 30 phút do tăng lưu lượng mùa vụ.',domain:'logistics',time:'14:20'},
+    {id:'p3',content:'Biên lợi nhuận Q2/2026 ước đạt 14.1%, cải thiện so với 13.2% đầu năm nhưng vẫn dưới ngưỡng 15%.',domain:'8h',time:'11:15'},
+    {id:'p4',content:'8H đang xem xét mở rộng sang vertical mới ngoài logistics trong H2/2026.',domain:'8h',time:'11:15'},
+    {id:'p5',content:'LSS Project B (e-commerce fulfillment) dự kiến kick-off tháng 8/2026 sau khi Project A hoàn thành.',domain:'logistics',time:'09:04'},
+    {id:'p6',content:'Thị trường logistics cross-border Việt–Trung tăng trưởng ước 18% YoY trong Q1/2026.',domain:'logistics',time:'09:04'},
+    {id:'p7',content:'SF Express khai trương kho 5,000m² tại Đồng Đăng, Lạng Sơn tháng 5/2026.',domain:'logistics',time:'09:04'},
+    {id:'p8',content:'Nhu cầu bonded warehouse tại Hữu Nghị tăng 35% so với cùng kỳ do FDI linh kiện điện tử.',domain:'logistics',time:'09:04'},
+    {id:'p9',content:'AnimaCore dự kiến thành lập tháng 7/2026 với định vị ETP độc lập.',domain:'8h',time:'09:04'},
+    {id:'p10',content:'LogXPro đang được refactor để hỗ trợ đa khách hàng, target 3 logistics operators năm 2026.',domain:'8h',time:'09:04'},
+  ],
+  canonical:[
+    {id:'c1',content:'8H có 17 người, vận hành theo mô hình ETP. Doanh thu 2026 ở mức 10.69–10.79 tỷ VND.',domain:'8h',time:'seed'},
+    {id:'c2',content:'3 luồng doanh thu: Outsourcing 58%, Hybrid 33%, SaaS 0% năm 2026.',domain:'8h',time:'seed'},
+    {id:'c3',content:'XC sở hữu 40% cổ phần 8H, anchor client ~70% doanh thu. Logistics operator tại Hữu Nghị.',domain:'8h',time:'seed'},
+    {id:'c4',content:'Thời gian thông quan nội bộ XC trung bình 4.2h/lô, thấp hơn ngành 6–8h.',domain:'logistics',time:'seed'},
+    {id:'c5',content:'Cửa khẩu Hữu Nghị xử lý ~60–70% lưu lượng hàng hóa đường bộ Việt–Trung.',domain:'logistics',time:'seed'},
+  ],
+  archived:[
+    {id:'a1',content:'Biên lợi nhuận 8H Q1/2026 là 12.8% (đã được cập nhật bởi dữ liệu Q2).',domain:'8h',time:'14:31'},
+  ]
+};
+let currentFilter='pending';
+
+function renderMem(f){
+  const list=document.getElementById('memList');
+  const items=memData[f]||[];
+  if(!items.length){list.innerHTML='<div class="empty">Không có dữ liệu</div>';return;}
+  list.innerHTML=items.map(m=>`
+    <div class="mem-row">
+      <div class="mem-dot ${f}"></div>
+      <div class="mem-content">
+        <div class="mem-text">${m.content}</div>
+        <div class="mem-meta">
+          <span class="mem-tag ${f}">${f}</span>
+          <span class="mem-tag domain">${m.domain}</span>
+          <span class="mem-time">${m.time}</span>
+        </div>
+      </div>
+      ${f==='pending'?`<div class="mem-actions">
+        <button class="ma approve" title="Duyệt" onclick="approveOne('${m.id}')"><i class="ti ti-check" aria-hidden="true"></i></button>
+        <button class="ma edit" title="Sửa"><i class="ti ti-edit" aria-hidden="true"></i></button>
+        <button class="ma reject" title="Từ chối" onclick="rejectOne('${m.id}')"><i class="ti ti-x" aria-hidden="true"></i></button>
+      </div>`:''}
+    </div>`).join('');
+}
+
+function updateCounts(){
+  const p=memData.pending.length,c=memData.canonical.length,a=memData.archived.length;
+  document.getElementById('pendingCount').textContent=p;
+  document.getElementById('dm-pending').textContent=p;
+  document.getElementById('memBadge').textContent=p;
+  document.getElementById('pt').textContent=`(${p})`;
+  document.getElementById('ct').textContent=`(${c})`;
+  document.getElementById('at').textContent=`(${a})`;
+  document.getElementById('mem-sub').textContent=`${p} pending · ${c} canonical · ${a} archived`;
+}
+
+function approveOne(id){
+  const idx=memData.pending.findIndex(m=>m.id===id);
+  if(idx===-1)return;
+  const[m]=memData.pending.splice(idx,1);
+  m.time=new Date().toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'});
+  memData.canonical.push(m);
+  updateCounts();renderMem(currentFilter);
+}
+
+function rejectOne(id){
+  const idx=memData.pending.findIndex(m=>m.id===id);
+  if(idx===-1)return;
+  const[m]=memData.pending.splice(idx,1);
+  m.time=new Date().toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'});
+  memData.archived.push(m);
+  updateCounts();renderMem(currentFilter);
+}
+
+function bulkApprove(){
+  const all=[...memData.pending];
+  all.forEach(m=>{m.time=new Date().toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'});memData.canonical.push(m);});
+  memData.pending=[];
+  updateCounts();renderMem(currentFilter);
+}
+
+function filterMem(f,el){
+  currentFilter=f;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  if(el)el.classList.add('on');
+  renderMem(f);
+}
+
+function compileDoc(statusId){
+  const el=document.getElementById(statusId);
+  el.className='st-status compiling';el.textContent='compiling';
+  setTimeout(()=>{el.className='st-status compiled';el.textContent='compiled';},2200);
+}
+
+const pages=['dashboard','memory','studio','agents','skills','audit'];
+function showPage(name,navEl){
+  pages.forEach(p=>{
+    const el=document.getElementById('page-'+p);
+    if(el)el.style.display=p===name?'flex':'none';
+  });
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('on'));
+  if(navEl)navEl.classList.add('on');
+  if(name==='memory')renderMem('pending');
+}
+
+renderMem('pending');updateCounts();
+</script>
+</body>
+</html>

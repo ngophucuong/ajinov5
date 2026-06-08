@@ -168,6 +168,7 @@ export default function Chat() {
   const [streaming, setStreaming] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>("1");
   const [votes, setVotes] = useState<Record<string, "up" | "down">>({});
+  const [researchArmed, setResearchArmed] = useState(false);
   const msgAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -497,7 +498,13 @@ export default function Chat() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (researchArmed && input.trim()) {
+        startResearch(input);
+        setInput("");
+        setResearchArmed(false);
+      } else {
+        handleSend();
+      }
     }
   };
 
@@ -905,7 +912,10 @@ export default function Chat() {
               </span>
               <div className="flex">
                 <button
-                  onClick={() => setMode("auto")}
+                  onClick={() => {
+                    setMode("auto");
+                    setResearchArmed(false);
+                  }}
                   title="Suy nghĩ tự động"
                   className={`px-3 py-1 border border-[rgba(255,255,255,0.09)] bg-transparent text-[#52586a] font-mono text-[10px] cursor-pointer transition-all rounded-l-[5px] ${
                     mode === "auto"
@@ -916,7 +926,10 @@ export default function Chat() {
                   ◎ Tự động
                 </button>
                 <button
-                  onClick={() => setMode(mode === "auto" ? "deep" : "auto")}
+                  onClick={() => {
+                    setMode(mode === "auto" ? "deep" : "auto");
+                    setResearchArmed(false);
+                  }}
                   title="Chế độ thủ công"
                   className={`px-3 py-1 border border-[rgba(255,255,255,0.09)] border-l-0 bg-transparent text-[#52586a] font-mono text-[10px] cursor-pointer transition-all rounded-r-[5px] ${
                     mode !== "auto"
@@ -930,7 +943,10 @@ export default function Chat() {
               {mode !== "auto" && (
                 <div className="flex gap-1 ml-1 items-center">
                   <button
-                    onClick={() => setMode("fast")}
+                    onClick={() => {
+                      setMode("fast");
+                      setResearchArmed(false);
+                    }}
                     title="Chế độ nhanh (DeepSeek Flash)"
                     className={`px-[10px] py-1 rounded-[5px] border border-[rgba(255,255,255,0.09)] bg-transparent text-[#52586a] font-mono text-[10px] cursor-pointer transition-all ${
                       mode === "fast"
@@ -941,7 +957,10 @@ export default function Chat() {
                     ⚡ Nhanh
                   </button>
                   <button
-                    onClick={() => setMode("deep")}
+                    onClick={() => {
+                      setMode("deep");
+                      setResearchArmed(false);
+                    }}
                     title="Chế độ sâu (DeepSeek Pro)"
                     className={`px-[10px] py-1 rounded-[5px] border border-[rgba(255,255,255,0.09)] bg-transparent text-[#52586a] font-mono text-[10px] cursor-pointer transition-all ${
                       mode === "deep"
@@ -960,9 +979,16 @@ export default function Chat() {
                   if (input.trim()) {
                     startResearch(input);
                     setInput("");
+                    setResearchArmed(false);
+                  } else {
+                    setResearchArmed(!researchArmed);
                   }
                 }}
-                title="Nghiên cứu sâu — AI tự đặt câu hỏi, tìm kiếm, tổng hợp báo cáo"
+                title={
+                  researchArmed
+                    ? "Đã chọn Nghiên cứu sâu — Enter để gửi câu hỏi nghiên cứu"
+                    : "Nghiên cứu sâu — AI tự đặt câu hỏi, tìm kiếm, tổng hợp báo cáo"
+                }
                 disabled={
                   research.phase !== "idle" &&
                   research.phase !== "done" &&
@@ -978,10 +1004,11 @@ export default function Chat() {
                 style={{
                   borderColor: "rgba(139,114,240,0.3)",
                   background:
-                    research.phase !== "idle" &&
-                    research.phase !== "done" &&
-                    research.phase !== "error"
-                      ? "rgba(139,114,240,0.08)"
+                    researchArmed ||
+                    (research.phase !== "idle" &&
+                      research.phase !== "done" &&
+                      research.phase !== "error")
+                      ? "rgba(139,114,240,0.12)"
                       : "transparent",
                   color: "#8b72f0",
                 }}
@@ -991,7 +1018,7 @@ export default function Chat() {
                     research.phase === "done" ||
                     research.phase === "error"
                   ) {
-                    e.currentTarget.style.background = "rgba(139,114,240,0.12)";
+                    e.currentTarget.style.background = "rgba(139,114,240,0.16)";
                   }
                 }}
                 onMouseLeave={(e) => {
@@ -1000,11 +1027,13 @@ export default function Chat() {
                     research.phase === "done" ||
                     research.phase === "error"
                   ) {
-                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.background = researchArmed
+                      ? "rgba(139,114,240,0.12)"
+                      : "transparent";
                   }
                 }}
               >
-                🔬 Nghiên cứu sâu
+                🔬 Nghiên cứu sâu{researchArmed ? " ✓" : ""}
               </button>
             </div>
             {/* Input row */}
@@ -1012,7 +1041,11 @@ export default function Chat() {
               <textarea
                 ref={textareaRef}
                 className="flex-1 bg-[#070910] border border-[rgba(255,255,255,0.09)] rounded-[12px] px-4 py-3 text-[#dde2ec] font-body text-[13.5px] resize-none outline-none min-h-[46px] max-h-[130px] transition-colors focus:border-[#00c8a4] placeholder:text-[#52586a] leading-relaxed"
-                placeholder="Hỏi bất cứ điều gì..."
+                placeholder={
+                  researchArmed
+                    ? "Nhập chủ đề nghiên cứu sâu..."
+                    : "Hỏi bất cứ điều gì..."
+                }
                 rows={1}
                 value={input}
                 onChange={(e) => {
@@ -1021,7 +1054,24 @@ export default function Chat() {
                 }}
                 onKeyDown={handleKeyDown}
               />
-              <SendButton onClick={handleSend} loading={streaming} />
+              <SendButton
+                onClick={() => {
+                  if (researchArmed && input.trim()) {
+                    startResearch(input);
+                    setInput("");
+                    setResearchArmed(false);
+                  } else {
+                    handleSend();
+                  }
+                }}
+                loading={streaming}
+                active={
+                  streaming ||
+                  (research.phase !== "idle" &&
+                    research.phase !== "done" &&
+                    research.phase !== "error")
+                }
+              />
             </div>
             <div className="flex items-center justify-center">
               <span className="font-mono text-[8px] text-[#52586a] opacity-60">

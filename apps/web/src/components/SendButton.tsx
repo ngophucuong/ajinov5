@@ -5,29 +5,37 @@ interface Props {
   onClick: (e: MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   loading?: boolean;
+  active?: boolean;
 }
 
-export default function SendButton({ onClick, disabled, loading }: Props) {
+export default function SendButton({
+  onClick,
+  disabled,
+  loading,
+  active = true,
+}: Props) {
+  const isActive = active || loading;
+
   return (
     <div className="relative w-[52px] h-[52px] flex-shrink-0 cursor-pointer group/sw">
       {/* Orbital ring 1 */}
       <div
-        className="absolute rounded-full border-[1.5px] border-transparent pointer-events-none transition-[animation-duration]"
+        className="absolute rounded-full border-[1.5px] border-transparent pointer-events-none transition-all duration-500"
         style={{
           inset: "-5px",
-          borderTopColor: "#00c8a4",
-          borderRightColor: "rgba(0,200,164,0.28)",
-          animation: "spin 2.5s linear infinite",
+          borderTopColor: isActive ? "#00c8a4" : "transparent",
+          borderRightColor: isActive ? "rgba(0,200,164,0.28)" : "transparent",
+          animation: isActive ? "spin 2.5s linear infinite" : "none",
         }}
       />
       {/* Orbital ring 2 */}
       <div
-        className="absolute rounded-full border-[0.5px] border-transparent pointer-events-none"
+        className="absolute rounded-full border-[0.5px] border-transparent pointer-events-none transition-all duration-500"
         style={{
           inset: "-11px",
-          borderBottomColor: "rgba(0,200,164,0.13)",
-          borderLeftColor: "rgba(0,200,164,0.06)",
-          animation: "spin 7s linear infinite reverse",
+          borderBottomColor: isActive ? "rgba(0,200,164,0.13)" : "transparent",
+          borderLeftColor: isActive ? "rgba(0,200,164,0.06)" : "transparent",
+          animation: isActive ? "spin 7s linear infinite reverse" : "none",
         }}
       />
       {/* Button core */}

@@ -1,0 +1,31 @@
+Có 5 điểm cần dặn dev trước khi implement Admin UI.
+
+---
+
+**1. `/admin` route phải check role server-side**
+
+Không chỉ ẩn link trên UI. Worker phải verify `role === 'admin'` trong JWT trước khi serve trang admin. Trả 403 nếu sai role — không redirect về login.
+
+---
+
+**2. Memory approve qua Admin UI phải trigger embedding ngay**
+
+Khi PATCH `status: canonical` → Agno phải gọi CF Workers AI embed `bge-m3` trong cùng request, không async sau. Response trả về khi embedding đã lưu xong. Nếu embed fail → trả 500, không set canonical.
+
+---
+
+**3. Bulk approve có giới hạn**
+
+Không approve toàn bộ 1 lần nếu số lượng lớn. Giới hạn 20 items/lần, batch tuần tự — tránh timeout CF Workers AI. UI hiện progress bar, không disable nút rồi im lặng.
+
+---
+
+**4. Audit log viewer không được phân trang bằng OFFSET lớn**
+
+Với append-only table lớn dần, `OFFSET 5000` rất chậm. Dùng cursor-based pagination: `WHERE created_at < :last_seen_at ORDER BY created_at DESC LIMIT 50`. UI dùng "load more" không dùng số trang.
+
+---
+
+**5. File từ Studio upload lên R2 trước khi insert DB**
+
+Thứ tự bắt buộc: upload R2 thành công → lấy `r2_key` → insert `studio_documents` row. Không được insert DB trước rồi upload sau — nếu upload fail sẽ có row mồ côi không có file.

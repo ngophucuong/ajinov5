@@ -1,0 +1,12 @@
+{
+  "name": "ajino-messaging-gateway",
+  "version": "5.0.0",
+  "description": "Ajino v5 Messaging Gateway — Telegram Bot with Intent Detection, State Machine, Chat, Memory Review, Capture",
+  "main": "server.js",
+  "dependencies": {
+    "axios": "^1.7.0",
+    "express": "^4.21.0",
+    "node-cron": "^3.0.0",
+    "telegramify-markdown": "^1.2.0"
+  }
+}
