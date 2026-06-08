@@ -1,0 +1,137 @@
+// ─── API Response Wrapper ────────────────────────────
+export interface ApiResponse<T> {
+  data: T | null;
+  error: { code: string; message: string } | null;
+}
+
+// ─── Auth ────────────────────────────────────────────
+export interface User {
+  id: string;
+  name?: string;
+  role: "ceo" | "admin";
+  telegram_id: number;
+  created_at?: string;
+}
+
+export interface OTPRequest {
+  telegram_id: number;
+}
+
+export interface OTPVerify {
+  telegram_id: number;
+  otp: string;
+}
+
+// ─── Chat ────────────────────────────────────────────
+export interface ChatSession {
+  id: string;
+  user_id?: string;
+  title?: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant";
+  content: string;
+  thinking_trace?: ThinkingTraceStep[];
+  model_used?: string;
+  reasoning_mode?: "auto" | "fast" | "deep";
+  tokens_used?: number;
+  latency_ms?: number;
+  created_at: string;
+}
+
+export interface ThinkingTraceStep {
+  step: number;
+  agent: string;
+  status: "running" | "done" | "error";
+  duration_ms: number;
+  result: string;
+}
+
+export type ReasoningMode = "auto" | "fast" | "deep";
+
+// ─── Memory ──────────────────────────────────────────
+export interface MemoryItem {
+  id: string;
+  content: string;
+  status: "pending" | "canonical" | "archived";
+  source: "chat" | "capture" | "studio" | "manual";
+  source_ref?: string;
+  approved_at?: string;
+  approved_by?: string;
+  decay_at?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+// ─── Capture ─────────────────────────────────────────
+export interface CaptureItem {
+  id: string;
+  user_id: string;
+  type: "text" | "link" | "image";
+  content?: string;
+  url?: string;
+  raw_file_r2_key?: string;
+  extracted_facts?: Array<{ fact: string; confidence: number }>;
+  status: "processing" | "extracted" | "committed" | "failed";
+  created_at: string;
+}
+
+// ─── Studio ──────────────────────────────────────────
+export interface StudioDocument {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  r2_key?: string;
+  compile_status: "draft" | "compiling" | "compiled" | "failed";
+  memory_ids?: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Console ─────────────────────────────────────────
+export interface AgentStatus {
+  name: string;
+  status: "active" | "idle";
+  last_called_at?: string;
+  call_count_today?: number;
+}
+
+export interface SkillStatus {
+  name: string;
+  description?: string;
+  enabled: boolean;
+  version: string;
+  call_count_session?: number;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  user_id?: string;
+  action: string;
+  resource_type?: string;
+  resource_id?: string;
+  llm_model?: string;
+  llm_tokens?: number;
+  payload?: Record<string, unknown>;
+  created_at: string;
+}
+
+// ─── SSE Events ──────────────────────────────────────
+export type SSEEvent =
+  | { event: "trace"; data: ThinkingTraceStep }
+  | { event: "token"; data: { delta: string } }
+  | {
+      event: "done";
+      data: {
+        message_id: string;
+        memory_candidates: Array<{ content: string; confidence: number }>;
+      };
+    }
+  | { event: "error"; data: { code: string; message: string } };

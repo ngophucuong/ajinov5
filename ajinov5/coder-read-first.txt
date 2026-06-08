@@ -1,0 +1,48 @@
+# ajinov5-architecture-contract.yaml
+# MANDATORY: Đọc trước khi code bất kỳ service nào
+
+naming_convention:
+  prefix: "aj5-"  # hoặc "ajinov5-"
+  
+  # KHÔNG BAO GIỜ dùng tên generic như "gateway", "api", "service"
+  # Luôn có suffix chỉ rõ layer
+
+compute_layer:
+  worker:
+    id: "agent-gateway"           # Cloudflare Worker (Edge Compute)
+    purpose: "Auth + Rate Limit + Routing + Embedding"
+    bindings: [KV, Vectorize, R2, AI]
+    domain: "ajinov5.cuong.ngo"
+    
+  vps_services:
+    agno:      { port: 8000, name: "aj5-agno-runtime" }
+    litellm:   { port: 4000, name: "aj5-litellm-router" }
+    messaging: { port: 3000, name: "aj5-messaging-gw" }
+
+observability_layer:
+  ai_gateway:
+    id: "llm-observatory"         # Cloudflare AI Gateway (NOT a Worker!)
+    purpose: "LLM call logging + caching + cost tracking"
+    url: "https://gateway.ai.cloudflare.com/v1/{account}/llm-observatory"
+    DO_NOT_CONFUSE_WITH: "agent-gateway Worker"
+    
+  logging:
+    litellm_callback: "llm-observatory"
+    workers_ai: "direct (no gateway wrap)"
+
+storage_layer:
+  kv:
+    otp:        { binding: "OTP_KV", id: "ffa7e82c..." }
+    rate_limit: { binding: "RATE_LIMIT_KV", id: "1ad9127d..." }
+  
+  vectorize:
+    index:      { binding: "VECTORIZE_INDEX", name: "agent-kb" }
+  
+  r2:
+    storage:    { binding: "R2_STORAGE", name: "agent-storage" }
+    backups:    { binding: "R2_BACKUPS", name: "agent-backups" }
+
+external_apis:
+  deepseek:     { via: "litellm", gateway_wrap: true }
+  serper:       { via: "agno-skill", gateway_wrap: false }
+  telegram:     { via: "messaging-gw", gateway_wrap: false }

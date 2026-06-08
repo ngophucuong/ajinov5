@@ -1,0 +1,342 @@
+# PROJECT_CONTRACT.yaml — Ajino v5
+# BS §D declaration. This file overrides AGENT_RULES.md OWNER DEFAULTS where specified.
+# Load alongside AGENT_RULES.md and AGENTS.md every session.
+# When a value here conflicts with AGENT_RULES.md SOFT defaults, this file wins.
+# When a value here conflicts with AGENT_RULES.md HARD constraints, HARD wins and you must flag it.
+
+project:
+  name: "Ajino v5"
+  slug: "ajino-v5"
+  type: "Private Executive Intelligence Platform"
+  tenant_model: "isolated"          # 1 customer = 1 box, no shared infra
+  version: "5.0.0"
+  ui_reference: "design/ajino_v5_ui.html"
+  schema_source: "services/agno/db/schema.sql"  # single source of truth
+
+# ─── HARD CONSTRAINTS (inherited from AGENT_RULES.md, repeated here for visibility) ─────
+hard:
+  ui_language: "vi-VN — mọi label, toast, button, error message phải bằng tiếng Việt"
+  code_language: "English — all code, SQL, comments, commits, API field names"
+  date_format: "dd/MM/yyyy in UI; ISO 8601 in API/DB"
+  money: "VND, INTEGER — no float, no DECIMAL; display with Intl.NumberFormat vi-VN"
+  owner_conversation: "Vietnamese when responding to owner; English for all artifacts"
+  no_mock: "ZERO mock responses in any environment. Fail closed. 4xx/5xx on real errors."
+  auth: "OTP via Telegram only — no password, no OAuth, no magic link"
+  append_only_audit: "audit_log table: no UPDATE, no DELETE, ever"
+
+# ─── STACK DECLARATION ────────────────────────────────────────────────────────────────
+stack:
+  frontend:
+    framework: "React 18"
+    bundler: "Vite"
+    language: "TypeScript"
+    styling: "Tailwind CSS"
+    fonts:
+      display: "Exo 2 (Google Fonts) — logo A, agent labels"
+      body: "DM Sans (Google Fonts)"
+      mono: "JetBrains Mono (Google Fonts)"
+    hosting: "Cloudflare Workers (NOT Pages — Workers has full feature parity as of 2026)"
+    note: "UI must match design/ajino_v5_ui.html exactly — open before any frontend work"
+
+  gateway:
+    runtime: "Cloudflare Workers (TypeScript + Hono)"
+    responsibilities:
+      - "JWT verification (httpOnly cookie or Authorization header)"
+      - "Rate limiting via KV (100 req/min per user)"
+      - "Proxy to Agno via CF Tunnel"
+      - "OTP session management via KV"
+    wrangler_toml: "apps/worker/wrangler.toml"
+
+  orchestration:
+    runtime: "Agno (Python 3.11+)"
+    framework: "FastAPI"
+    port: 8000
+    built_in: "PostgreSQL + pgvector (Agno native support — no separate DB service needed)"
+    agents:
+      - name: "orchestrator"   color: "#d4a05a"  role: "routes queries, assembles context"
+      - name: "reasoning"      color: "#8b72f0"  role: "deep analysis, decomposition"
+      - name: "search"         color: "#00c8a4"  role: "Serper web search"
+      - name: "memory"         color: "#d4a05a"  role: "memory retrieval, idle by default"
+      - name: "knowledge"      color: "#00c8a4"  role: "document retrieval, idle by default"
+      - name: "synthesis"      color: "#8b72f0"  role: "final response generation"
+
+  llm_routing:
+    service: "LiteLLM"
+    port: 4000
+    config: "services/litellm/config.yaml"
+    models:
+      deepseek_pro:
+        alias: "deepseek-pro"
+        model_string: "deepseek-v4-pro"
+        thinking_mode: true               # thinking mode mặc định
+        use_for: "reasoning_mode=deep, synthesis step, complex queries in auto mode"
+      deepseek_flash:
+        alias: "deepseek-flash"
+        model_string: "deepseek-v4-flash"
+        thinking_mode: false              # non-thinking, nhanh + rẻ
+        use_for: "reasoning_mode=fast, decompose step, simple queries in auto mode"
+      deprecated_note: "deepseek-chat & deepseek-reasoner sẽ bị deprecated 2026/07/24 — dùng model mới"
+    outer_layer: "Cloudflare AI Gateway (logging + caching, wraps LiteLLM)"
+
+  embedding:
+    service: "Cloudflare Workers AI"
+    model: "@cf/baai/bge-m3"
+    dimensions: 1024
+    language_support: "Vietnamese + Chinese + English (multilingual)"
+    called_from: "Agno via HTTP to CF Workers AI API"
+
+  vector_search:
+    primary: "Cloudflare Vectorize (agent-kb, 1024d, cosine)"
+    fallback: "pgvector (PostgreSQL container, ivfflat lists=100)"
+    search_strategy: "hybrid: Vectorize cosine similarity + pgvector keyword (tsvector) + structured queries"
+    rule: "AI coder ưu tiên gọi Vectorize. pgvector dùng cho fallback + full-text search."
+
+  database:
+    engine: "PostgreSQL 16 + pgvector extension (container riêng — không gộp vào Agno)"
+
+  storage:
+    service: "Cloudflare R2"
+    bucket: "ajino-v5"
+    use_for: "file uploads (Studio, Capture images), daily backup snapshots"
+    sdk: "S3-compatible API (@aws-sdk/client-s3 with R2 endpoint)"
+
+  messaging:
+    service: "Custom Messaging Gateway (Python + FastAPI)"
+    port: 3000
+    channels:
+      telegram:
+        enabled: true
+        use_for: "OTP delivery, bot chat, reminders, Mini App"
+        bot_setup: "@BotFather — must have TELEGRAM_BOT_TOKEN in .env"
+      whatsapp:
+        enabled: false
+        excluded: true           # KHÔNG tạo messaging/whatsapp.py trong v5
+        note: "Gateway vẫn start bình thường — nếu WHATSAPP_TOKEN thiếu trong .env, chỉ log 'WhatsApp disabled'. Telegram hoạt động độc lập."
+    zalo_oa: "excluded — not in scope for v5"
+
+  tunnel:
+    service: "Cloudflare Tunnel (cloudflared)"
+    purpose: "VPS has NO public IP — all inbound traffic via tunnel"
+    routes:
+      - "api.ajinov5.cuong.ngo → VPS:8000 (Agno)"
+      - "ajinov5.cuong.ngo → Cloudflare Workers (frontend + auth)"
+
+  kv_namespaces:
+    KV_OTP_SESSIONS:
+      name: "agent-otp-sessions"
+      id: "ffa7e82c943b4cbdb427d184a40e3989"
+      key_pattern: "otp:{telegram_id}"
+      ttl_seconds: 300
+      value_schema: '{ "otp": "string", "user_id": "UUID|null", "expires_at": "ISO8601" }'
+    KV_RATE_LIMIT:
+      name: "agent-rate-limits"
+      id: "1ad9127dbf174f978c376b0ae91ba424"
+      key_pattern: "rl:{user_id}:{window_minute}"
+      ttl_seconds: 60
+      value_schema: "integer (request count)"
+
+  r2_buckets:
+    storage:
+      name: "agent-storage"
+      region: "APAC"
+      use_for: "file uploads (Studio, Capture images)"
+    backups:
+      name: "agent-backups"
+      region: "APAC"
+      use_for: "daily pg_dump snapshots"
+
+  ai_gateway:
+    name: "llm-observatory"
+    rate_limit: "1000 req/60s"
+    cache_ttl: 3600
+    logging: true
+    note: "Wraps LiteLLM — all LLM calls pass through this"
+
+  vectorize:
+    name: "agent-kb"
+    dimensions: 1024
+    metric: "cosine"
+    status: "PRIMARY vector search in v5 — ưu tiên gọi Vectorize, pgvector fallback"
+
+  deployment:
+    container: "Docker Compose"
+    services: ["agno", "litellm", "messaging-gateway", "cloudflared"]
+    compose_files:
+      production: "infra/docker-compose.yml"
+      development: "infra/docker-compose.dev.yml"
+    update_strategy: "versioned opt-in per tenant — 2 active tracks max (STABLE 6mo / CURRENT 1mo)"
+    backup:
+      postgres: "pg_dump daily → R2"
+      schedule: "cron at 02:00 UTC"
+
+# ─── REASONING MODES ──────────────────────────────────────────────────────────────────
+reasoning_modes:
+  auto:
+    description: "Orchestrator decides based on query_complexity() — heuristic, NO ML, NO LLM call"
+    logic:
+      keywords:
+        - "phân tích, so sánh, đánh giá, chiến lược, dự báo"
+        - "tại sao, nguyên nhân, rủi ro, cơ hội, xu hướng"
+        - "analyze, compare, strategy, forecast, why, risk"
+      rules:
+        - "word_count > 30 → deep"
+        - "contains any analytical keyword → deep"
+        - "has 2+ question marks → deep"
+        - "else → fast"
+      constraint: "Must run in microseconds — pure string matching, không gọi LLM"
+  fast:
+    model: "deepseek-flash"
+    pipeline: "single pass — no decomposition"
+  deep:
+    model: "deepseek-pro"
+    pipeline: "Decompose → Agentic Loop (up to 5 iterations) → Vector Search → Synthesis"
+
+# ─── CHAT PIPELINE ────────────────────────────────────────────────────────────────────
+chat_pipeline:
+  stage_1_decompose:
+    agent: "reasoning"
+    model: "deepseek-flash"
+    output: "list of sub-questions (max 3)"
+    skipped_if: "reasoning_mode=fast"
+  stage_2_agentic_loop:
+    agent: "orchestrator"
+    max_iterations: 5
+    may_call_skills: ["web_search", "memory_retrieval", "knowledge"]
+    exit_condition: "all sub-questions answered OR max_iterations reached"
+  stage_3_vector_search:
+    agent: "memory"
+    search: "hybrid (keyword + cosine similarity on pgvector)"
+    top_k: 7
+    filter: "status='canonical'"
+  stage_4_synthesis:
+    agent: "synthesis"
+    model: "deepseek-pro (deep) | deepseek-flash (fast)"
+    output: "markdown response + memory candidates"
+
+# ─── MEMORY LIFECYCLE ─────────────────────────────────────────────────────────────────
+memory_lifecycle:
+  states: ["pending", "canonical", "archived"]
+  transitions:
+    chat_extraction:   "LLM extracts facts from response → pending"
+    capture_commit:    "user commits extracted facts → pending"
+    studio_compile:    "document compiled → pending"
+    manual_create:     "admin creates directly → pending"
+    approve:           "admin/ceo approves → canonical (sets approved_at, approved_by, triggers embedding)"
+    reject:            "admin rejects → archived"
+    decay:             "decay_at date reached → archived (cron job)"
+  decay_default_days: 730  # 2 years — NULL means no decay
+  inject_only: "canonical memories injected into context — pending/archived never injected"
+
+# ─── AUDIT REQUIREMENTS ───────────────────────────────────────────────────────────────
+audit:
+  append_only: true
+  required_for_every:
+    - "chat.message"
+    - "memory.approve"
+    - "memory.reject"
+    - "memory.edit"
+    - "memory.create"
+    - "capture.commit"
+    - "studio.compile"
+    - "auth.otp_request"
+    - "auth.otp_verify"
+    - "auth.logout"
+    - "admin.bulk_approve"
+  payload_must_include: ["user_id", "resource_id", "action", "created_at"]
+  llm_calls_must_include: ["llm_model", "llm_tokens", "latency_ms"]
+
+# ─── AUTHORIZATION MATRIX ─────────────────────────────────────────────────────────────
+authorization:
+  roles: ["ceo", "admin"]
+  default_new_role: "ceo"
+  matrix:
+    ceo:
+      - "GET|POST|PATCH /api/chat/**"
+      - "GET|POST|PATCH /api/memory/**"
+      - "GET|POST /api/capture/**"
+      - "POST /api/capture/{id}/commit"
+      - "GET|POST|PUT|DELETE /api/studio/**"
+      - "GET /api/console/skills"
+    admin:
+      - "ALL /api/**"
+      - "ALL /admin/**"
+      - "GET /api/console/**"
+  rule: "check role server-side in every handler — hiding UI elements is not authorization"
+
+# ─── ERROR CODES ─────────────────────────────────────────────────────────────────────
+error_codes:
+  AUTH_001: "OTP_INVALID — OTP does not match"
+  AUTH_002: "OTP_EXPIRED — OTP TTL exceeded"
+  AUTH_003: "OTP_RATE_LIMITED — too many requests"
+  AUTH_004: "JWT_INVALID — bad signature or malformed"
+  AUTH_005: "JWT_EXPIRED — token past exp"
+  AUTH_006: "UNAUTHORIZED — valid JWT but insufficient role"
+  CHAT_001: "SESSION_NOT_FOUND"
+  CHAT_002: "LLM_ERROR — upstream LLM failed"
+  CHAT_003: "PIPELINE_TIMEOUT — pipeline exceeded 60s"
+  MEM_001: "MEMORY_NOT_FOUND"
+  MEM_002: "EMBED_FAILED — CF Workers AI embedding failed"
+  SVC_001: "SERVICE_UNAVAILABLE — downstream service unreachable"
+  DB_001: "DATABASE_ERROR — write failed"
+
+# ─── ACCEPTANCE GATES ─────────────────────────────────────────────────────────────────
+# A feature is NOT done until all gates pass. No exceptions.
+acceptance_gates:
+  all_modules:
+    - "docker compose ps shows all 4 services Up"
+    - "health endpoint returns {status:ok} with real DB connection status"
+    - "no 500 on happy path"
+    - "audit_log row written for every action"
+    - "curl output pasted in VERIFY-OUTPUT (no screenshot, no 'it works')"
+
+  auth:
+    - "real Telegram message delivered within 10 seconds"
+    - "expired OTP returns 401 AUTH_002 (not 200)"
+    - "user row exists in DB after successful verification"
+
+  chat:
+    - "SSE delivers trace events with real duration_ms > 0"
+    - "chat_messages row in DB with non-null model_used"
+    - "memory candidates returned in done event"
+
+  memory:
+    - "approved memory has embedding IS NOT NULL"
+    - "pending memory never appears in chat context (verify by checking inject logic)"
+    - "audit_log row for every approve/reject"
+
+  ui:
+    - "open design/ajino_v5_ui.html — open implementation side-by-side"
+    - "logo A: font-family Exo 2, no serifs, color #00c8a4"
+    - "send button: 2 orbital rings visible, spin on load, speed up on hover"
+    - "agent network SVG: particles animate on active edges"
+    - "thinking trace: collapsible, shows real pipeline steps"
+    - "reasoning toggle: Auto/Manual functional, Manual shows Fast/Deep"
+
+# ─── KNOWN ASSUMPTIONS (resolve before shipping) ──────────────────────────────────────
+assumptions:
+  - id: "A1"
+    text: "Cloudflare Vectorize là primary vector search — chưa test ở production scale"
+    verify_by: "benchmark với 10k memory rows, so sánh Vectorize vs pgvector p95 latency"
+    risk: "Nếu Vectorize chậm → fallback về pgvector ivfflat (đã có sẵn trong schema)"
+    status: "ACTIVE — Vectorize là primary trong v5"
+
+  - id: "A2"
+    text: "WhatsApp Cloud API token availability — skip if not provided"
+    verify_by: "check if WHATSAPP_TOKEN in .env"
+    risk: "WhatsApp channel disabled — Telegram vẫn hoạt động. Không tạo messaging/whatsapp.py."
+    status: "EXCLUDED — WhatsApp không trong scope v5"
+
+# ─── CONSTRAINTS OVERRIDE SUMMARY ─────────────────────────────────────────────────────
+overrides_from_agent_rules:
+  db_default:
+    original: "SQLite (D1)"
+    overridden_to: "PostgreSQL 16 + pgvector (container riêng)"
+    reason: "pgvector required for hybrid vector+keyword search on executive memory"
+  infra_default:
+    original: "Cloudflare end-to-end"
+    overridden_to: "Cloudflare + VPS Docker (hybrid)"
+    reason: "Agno + LiteLLM + PostgreSQL require persistent compute — not possible on Workers"
+  ci_cd_default:
+    original: "Cloudflare Git integration"
+    overridden_to: "Cloudflare Workers (frontend/worker) + Docker Compose (VPS services)"
+    reason: "VPS services need Docker — Cloudflare CI only for the Worker"

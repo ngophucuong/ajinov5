@@ -1,0 +1,43 @@
+# Git ignore rules for Ajino v5
+# === SECRETS (never commit) ===
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+cloudflared/
+
+# === Dependencies ===
+node_modules/
+.pnpm-store/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# === Build output ===
+dist/
+build/
+.next/
+.cache/
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Docker ===
+pgdata/
+backups/*.sql
+!backups/.gitkeep
+
+# === Misc ===
+*.log
+.env.example.live   # prevent accidentally committing live .env

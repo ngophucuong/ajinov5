@@ -1,0 +1,25 @@
+model_list:
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: https://api.deepseek.com/v1
+      timeout: 120
+
+  - model_name: deepseek-reasoner
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: https://api.deepseek.com/v1
+      timeout: 180
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  
+  # ✅ AI Gateway: llm-observatory (NOT agent-gateway!)
+  callbacks: ["https://gateway.ai.cloudflare.com/v1/c420c80032474b31c185cb71930c4e8f/llm-observatory"]
+
+router_settings:
+  timeout: 120
+  routing_strategy: simple-shuffle
+  num_retries: 2
