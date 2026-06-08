@@ -104,6 +104,7 @@ export default function Chat() {
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [researchJobId, setResearchJobId] = useState<string | null>(null);
+  const [researchPanelVisible, setResearchPanelVisible] = useState(false);
   const msgAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -597,6 +598,7 @@ export default function Chat() {
     try {
       const { job_id, session_id } = await startResearchV2(topic);
       setResearchJobId(job_id);
+      setResearchPanelVisible(true);
       if (session_id) {
         setSessions((prev) => [
           { id: session_id, title: topic.slice(0, 40), time: "bây giờ" },
@@ -1037,11 +1039,11 @@ export default function Chat() {
             )}
 
             {/* Research V2 panel */}
-            {researchJobId && (
+            {researchJobId && researchPanelVisible && (
               <div className="self-start w-full">
                 <ResearchPanel
                   jobId={researchJobId}
-                  onClose={() => setResearchJobId(null)}
+                  onClose={() => setResearchPanelVisible(false)}
                   onDone={(title, content, sectionCount, documentId) => {
                     void (async () => {
                       let finalContent = content;
@@ -1073,6 +1075,7 @@ export default function Chat() {
                       };
                       setMessages((prev) => [...prev, userMsg, assistantMsg]);
                       setResearchJobId(null);
+                      setResearchPanelVisible(false);
                     })();
                   }}
                 />
@@ -1082,6 +1085,18 @@ export default function Chat() {
 
           {/* ─── Input area ──────────────────────────── */}
           <div className="relative px-5 pt-[11px] pb-4 border-t border-[rgba(255,255,255,0.05)] bg-[#0c0f18] flex flex-col gap-[9px]">
+            {researchJobId && !researchPanelVisible && (
+              <div className="flex justify-start">
+                <button
+                  onClick={() => setResearchPanelVisible(true)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px] border border-[rgba(139,114,240,0.22)] bg-[rgba(139,114,240,0.1)] text-[#8b72f0] text-[10px] font-mono transition-all hover:bg-[rgba(139,114,240,0.15)]"
+                >
+                  <span className="w-[6px] h-[6px] rounded-full bg-[#8b72f0] animate-[pulse_1.2s_ease-in-out_infinite]" />
+                  Mở lại nghiên cứu sâu đang chạy
+                </button>
+              </div>
+            )}
+
             {/* Reasoning row */}
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-[9px] uppercase tracking-[.1em] text-[#52586a] mr-0.5">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { StudioDocument } from "../lib/types";
 import {
@@ -96,6 +96,9 @@ export default function Studio() {
   const [messageType, setMessageType] = useState<"success" | "error">(
     "success",
   );
+  const editorPaneRef = useRef<HTMLDivElement | null>(null);
+  const previewPaneRef = useRef<HTMLDivElement | null>(null);
+  const editorTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const isDirty = useMemo(
     () => !!doc && (draftTitle !== doc.title || draftContent !== doc.content),
@@ -192,6 +195,19 @@ export default function Studio() {
       cancelled = true;
     };
   }, [selectedId]);
+
+  useEffect(() => {
+    if (editorPaneRef.current) editorPaneRef.current.scrollTop = 0;
+    if (previewPaneRef.current) previewPaneRef.current.scrollTop = 0;
+    if (editorTextareaRef.current) editorTextareaRef.current.scrollTop = 0;
+  }, [selectedId, viewMode]);
+
+  useEffect(() => {
+    const textarea = editorTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.max(textarea.scrollHeight, 520)}px`;
+  }, [draftContent, viewMode, selectedId]);
 
   async function handleCreate() {
     if (!createTitle.trim()) return;
@@ -608,7 +624,10 @@ export default function Studio() {
                   }`}
                 >
                   {viewMode !== "preview" && (
-                    <div className="min-h-0 overflow-y-auto p-5 border-r border-[rgba(255,255,255,0.05)]">
+                    <div
+                      ref={editorPaneRef}
+                      className="min-h-0 overflow-y-auto p-5 border-r border-[rgba(255,255,255,0.05)]"
+                    >
                       <div className="flex flex-col gap-3">
                         <div>
                           <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#52586a] mb-2">
@@ -625,7 +644,8 @@ export default function Studio() {
                             Markdown gốc
                           </div>
                           <textarea
-                            className="w-full min-h-[520px] bg-[#070910] border border-[rgba(255,255,255,0.09)] rounded-lg px-4 py-4 text-[#dde2ec] text-[12px] resize-none outline-none focus:border-[#00c8a4] font-mono leading-[1.75]"
+                            ref={editorTextareaRef}
+                            className="w-full bg-[#070910] border border-[rgba(255,255,255,0.09)] rounded-lg px-4 py-4 text-[#dde2ec] text-[12px] resize-none outline-none focus:border-[#00c8a4] font-mono leading-[1.75] overflow-hidden"
                             value={draftContent}
                             onChange={(e) => setDraftContent(e.target.value)}
                           />
@@ -635,7 +655,7 @@ export default function Studio() {
                   )}
 
                   {viewMode !== "edit" && (
-                    <div className="min-h-0 overflow-y-auto p-5">
+                    <div ref={previewPaneRef} className="min-h-0 overflow-y-auto p-5">
                       <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#52586a] mb-3">
                         Bản xem trước
                       </div>
