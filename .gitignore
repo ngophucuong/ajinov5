@@ -41,3 +41,4 @@ backups/*.sql
 # === Misc ===
 *.log
 .env.example.live   # prevent accidentally committing live .env
+docs/.secrets.md
