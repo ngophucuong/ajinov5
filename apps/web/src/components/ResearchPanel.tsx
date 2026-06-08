@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getResearchStatus } from "../lib/api";
-import type { ResearchJobStatus } from "../lib/types";
+import type {
+  ResearchAngles,
+  ResearchJobStatus,
+  ResearchPlanSection,
+} from "../lib/types";
 import SectionCard from "./SectionCard";
 import { IconFileText } from "@tabler/icons-react";
 
@@ -22,10 +26,257 @@ const C = {
   am: "#d4a05a",
 };
 
+function joinItems(values?: string[], limit = 3): string | null {
+  if (!values || values.length === 0) return null;
+  return values
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, limit)
+    .join(", ");
+}
+
+function AngleInsights({ angles }: { angles?: ResearchAngles | null }) {
+  if (!angles) return null;
+  const depthLabel =
+    angles.action?.recommended_depth === "brief"
+      ? "ngắn gọn"
+      : angles.action?.recommended_depth === "standard"
+        ? "tiêu chuẩn"
+        : angles.action?.recommended_depth === "deep"
+          ? "chuyên sâu"
+          : null;
+
+  const items = [
+    {
+      icon: "👥",
+      label: "Bên liên quan",
+      value: joinItems(angles.who?.stakeholders),
+    },
+    {
+      icon: "🎯",
+      label: "Mục đích",
+      value: angles.why?.underlying_goal?.trim() || null,
+    },
+    {
+      icon: "❓",
+      label: "Quyết định",
+      value: angles.why?.decision_to_make?.trim() || null,
+    },
+    {
+      icon: "⚠️",
+      label: "Điểm mù",
+      value: joinItems(angles.risk?.blind_spots, 2),
+    },
+    {
+      icon: "📊",
+      label: "Độ sâu",
+      value: depthLabel,
+    },
+  ].filter((item) => item.value);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div
+      className="rounded-[10px] px-[13px] py-[10px] flex flex-col gap-[5px]"
+      style={{
+        background: "rgba(139,114,240,0.08)",
+        border: "0.5px solid rgba(139,114,240,0.2)",
+      }}
+    >
+      <div
+        className="font-mono text-[9px] uppercase tracking-[.1em]"
+        style={{ color: C.pu }}
+      >
+        Ajino đã phân tích từ 7 góc độ
+      </div>
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className="flex items-start gap-[6px] text-[11.5px] leading-[1.4]"
+        >
+          <span>{item.icon}</span>
+          <span
+            className="font-mono text-[10px] min-w-[70px] flex-shrink-0"
+            style={{ color: C.mu }}
+          >
+            {item.label}:
+          </span>
+          <span style={{ color: C.tx }}>{item.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SectionOutline({
+  section,
+  runtimeStatus,
+  expanded,
+  onToggle,
+}: {
+  section: ResearchPlanSection;
+  runtimeStatus?: "pending" | "running" | "done" | "failed";
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const status = runtimeStatus || "pending";
+  const statusLabel =
+    status === "done"
+      ? "xong"
+      : status === "running"
+        ? "đang viết"
+        : status === "failed"
+          ? "lỗi"
+          : "chờ";
+  const statusColor =
+    status === "done"
+      ? C.gr
+      : status === "running"
+        ? C.am
+        : status === "failed"
+          ? "#e06868"
+          : C.mu;
+  const keyQuestions = section.key_questions?.filter(Boolean) || [];
+  const previousRefs = section.use_previous_sections?.filter(Boolean) || [];
+  const outputFormatLabel =
+    section.output_format === "paragraph"
+      ? "đoạn văn"
+      : section.output_format === "bullets"
+        ? "gạch đầu dòng"
+        : section.output_format === "table"
+          ? "bảng"
+          : section.output_format === "mixed"
+            ? "hỗn hợp"
+            : null;
+
+  return (
+    <div
+      className="rounded-[8px] overflow-hidden"
+      style={{
+        background: "#0c0f18",
+        border:
+          status === "running"
+            ? "0.5px solid rgba(212,160,90,0.3)"
+            : "0.5px solid rgba(255,255,255,0.05)",
+      }}
+    >
+      <div
+        className="flex items-center gap-2 px-[14px] py-[10px] cursor-pointer select-none transition-colors hover:bg-[rgba(139,114,240,0.04)]"
+        onClick={onToggle}
+      >
+        <span
+          className="text-[10px] font-mono"
+          style={{ color: statusColor, minWidth: 52 }}
+        >
+          {statusLabel}
+        </span>
+        <span
+          className="flex-1 text-[12px] font-medium"
+          style={{ color: C.tx }}
+        >
+          {section.title}
+        </span>
+        <span
+          className="text-[10px] transition-transform"
+          style={{
+            color: C.mu,
+            transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
+          }}
+        >
+          ▼
+        </span>
+      </div>
+
+      {expanded && (
+        <div
+          className="px-[16px] py-[10px] flex flex-col gap-[7px]"
+          style={{ borderTop: "0.5px solid rgba(255,255,255,0.05)" }}
+        >
+          {section.objective && (
+            <div className="text-[11px] leading-[1.5]" style={{ color: C.tx }}>
+              <span className="font-mono text-[9px] mr-[6px]" style={{ color: C.mu }}>
+                mục tiêu
+              </span>
+              {section.objective}
+            </div>
+          )}
+          {keyQuestions.length > 0 && (
+            <div className="flex flex-col gap-[4px]">
+              <span
+                className="font-mono text-[9px] uppercase tracking-[.08em]"
+                style={{ color: C.pu }}
+              >
+                Câu hỏi trọng tâm
+              </span>
+              {keyQuestions.map((question) => (
+                <div
+                  key={question}
+                  className="text-[11px] leading-[1.45] pl-[10px] relative"
+                  style={{ color: C.tx }}
+                >
+                  <span
+                    className="absolute left-0 top-0"
+                    style={{ color: C.pu }}
+                  >
+                    •
+                  </span>
+                  {question}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-[6px] text-[9px] font-mono">
+            {outputFormatLabel && (
+              <span
+                className="px-[6px] py-[2px] rounded-[4px]"
+                style={{
+                  background: "rgba(139,114,240,0.08)",
+                  border: "0.5px solid rgba(139,114,240,0.2)",
+                  color: C.pu,
+                }}
+              >
+                {outputFormatLabel}
+              </span>
+            )}
+            {section.estimated_words && (
+              <span
+                className="px-[6px] py-[2px] rounded-[4px]"
+                style={{
+                  background: "rgba(212,160,90,0.08)",
+                  border: "0.5px solid rgba(212,160,90,0.2)",
+                  color: C.am,
+                }}
+              >
+                ~{section.estimated_words} từ
+              </span>
+            )}
+            {previousRefs.length > 0 && (
+              <span
+                className="px-[6px] py-[2px] rounded-[4px]"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "0.5px solid rgba(255,255,255,0.09)",
+                  color: C.mu,
+                }}
+              >
+                dùng: {previousRefs.join(", ")}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ResearchPanel({ jobId, onClose, onDone }: Props) {
   const navigate = useNavigate();
   const [job, setJob] = useState<ResearchJobStatus | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
+    new Set(),
+  );
+  const [expandedOutlineSections, setExpandedOutlineSections] = useState<Set<string>>(
     new Set(),
   );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -109,6 +360,9 @@ export default function ResearchPanel({ jobId, onClose, onDone }: Props) {
   const isActive =
     job.status !== "done" && job.status !== "failed" && job.status !== "queued";
   const progressPct = job.progress || 0;
+  const runtimeStatusMap = new Map(
+    job.sections.map((section) => [section.id, section.status]),
+  );
 
   return (
     <div
@@ -194,6 +448,35 @@ export default function ResearchPanel({ jobId, onClose, onDone }: Props) {
           </div>
         )}
 
+        {job.angles && job.status !== "done" && <AngleInsights angles={job.angles} />}
+
+        {job.plan?.sections && job.plan.sections.length > 0 && (
+          <div className="flex flex-col gap-[6px]">
+            <div
+              className="font-mono text-[9px] uppercase tracking-[.1em]"
+              style={{ color: C.mu }}
+            >
+              Dàn ý nghiên cứu
+            </div>
+            {job.plan.sections.map((section) => (
+              <SectionOutline
+                key={section.id}
+                section={section}
+                runtimeStatus={runtimeStatusMap.get(section.id)}
+                expanded={expandedOutlineSections.has(section.id)}
+                onToggle={() =>
+                  setExpandedOutlineSections((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(section.id)) next.delete(section.id);
+                    else next.add(section.id);
+                    return next;
+                  })
+                }
+              />
+            ))}
+          </div>
+        )}
+
         {/* Sections */}
         {job.sections && job.sections.length > 0 && (
           <div className="flex flex-col gap-[6px]">
@@ -236,7 +519,8 @@ export default function ResearchPanel({ jobId, onClose, onDone }: Props) {
                 Báo cáo đã hoàn thành
               </span>
               <span className="text-[9px] font-mono" style={{ color: C.mu }}>
-                {job.sections?.length || 0} sections · đã lưu vào Studio
+                {job.intent_meta?.estimated_sections || job.sections?.length || 0}{" "}
+                phần · đã lưu vào Studio
               </span>
             </div>
             <button

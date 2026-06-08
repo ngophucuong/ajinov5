@@ -94,8 +94,50 @@ async def run_job(
         )
         from .intent_analyzer import analyze_intent
 
-        intent = await analyze_intent(query, litellm_url, litellm_api_key)
-        update_job(job_id, progress=15, intent=intent)
+        intent = await analyze_intent(
+            query,
+            litellm_url,
+            litellm_api_key,
+            db_pool=db_pool,
+        )
+        update_job(
+            job_id,
+            progress=15,
+            intent=intent,
+            angles=intent.get("angles"),
+        )
+
+        if db_pool:
+            try:
+                audit_user_uuid = None
+                user_id_str = job.get("user_id")
+                if user_id_str:
+                    row = await db_pool.fetchrow(
+                        "SELECT id FROM users WHERE telegram_id = $1",
+                        int(user_id_str),
+                    )
+                    if row:
+                        audit_user_uuid = row["id"]
+
+                await db_pool.execute(
+                    "INSERT INTO audit_log (user_id, action, resource_type, payload) "
+                    "VALUES ($1, 'research.intent_analyzed', 'research_job', $2)",
+                    audit_user_uuid,
+                    json.dumps(
+                        {
+                            "job_id": job_id,
+                            "query": query[:200],
+                            "depth": intent.get("depth"),
+                            "sections_count": intent.get("estimated_sections"),
+                            "memory_hits": intent.get("memory_hits", 0),
+                            "angles_used": sorted(
+                                list((intent.get("angles") or {}).keys())
+                            ),
+                        }
+                    ),
+                )
+            except Exception as e:
+                print(f"[job_manager] intent audit warning: {e}")
 
         # === STEP 2: Plan Generation ===
         update_job(

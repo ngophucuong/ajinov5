@@ -1514,6 +1514,15 @@ async def get_research_status(job_id: str):
             "progress": job["progress"],
             "current_step": job["current_step"],
             "plan_title": job["plan"]["title"] if job.get("plan") else None,
+            "angles": job.get("angles"),
+            "intent_meta": {
+                "depth": (job.get("intent") or {}).get("depth"),
+                "memory_hits": (job.get("intent") or {}).get("memory_hits", 0),
+                "estimated_sections": (job.get("intent") or {}).get(
+                    "estimated_sections"
+                ),
+            },
+            "plan": job.get("plan"),
             "sections": [
                 {
                     "id": s["id"],

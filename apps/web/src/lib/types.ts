@@ -111,12 +111,75 @@ export interface ResearchSection {
   content: string | null;
 }
 
+export interface ResearchPlanSection {
+  id: string;
+  title: string;
+  description?: string;
+  objective?: string;
+  search_queries?: string[];
+  memory_queries?: string[];
+  use_previous_sections?: string[];
+  output_format?: "paragraph" | "bullets" | "table" | "mixed";
+  estimated_words?: 200 | 300 | 400 | 500;
+  key_questions?: string[];
+  key_points?: string[];
+}
+
+export interface ResearchAngles {
+  who?: {
+    primary?: string;
+    stakeholders?: string[];
+    competitors?: string[];
+  };
+  what?: {
+    core_topic?: string;
+    dimensions?: string[];
+    not_asking_about?: string[];
+  };
+  when?: {
+    timeframe?: string;
+    key_milestones?: string[];
+    urgency?: "immediate" | "strategic" | "exploratory";
+  };
+  why?: {
+    underlying_goal?: string;
+    decision_to_make?: string;
+    success_metric?: string;
+  };
+  risk?: {
+    known_risks?: string[];
+    unknown_risks?: string[];
+    blind_spots?: string[];
+  };
+  gap?: {
+    likely_knows?: string[];
+    likely_missing?: string[];
+    assumptions_to_validate?: string[];
+  };
+  action?: {
+    output_type?: "decision" | "strategy" | "analysis" | "report";
+    audience?: string;
+    recommended_depth?: "brief" | "standard" | "deep";
+    recommended_sections?: 4 | 6 | 8;
+  };
+}
+
 export interface ResearchJobStatus {
   job_id: string;
   status: string;
   progress: number;
   current_step: string;
   plan_title: string | null;
+  angles?: ResearchAngles | null;
+  intent_meta?: {
+    depth?: "brief" | "standard" | "deep";
+    memory_hits?: number;
+    estimated_sections?: 4 | 6 | 8;
+  } | null;
+  plan?: {
+    title?: string;
+    sections?: ResearchPlanSection[];
+  } | null;
   sections: ResearchSection[];
   error: string | null;
   document_id: string | null;
