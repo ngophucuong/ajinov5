@@ -11,7 +11,7 @@ import {
   createSessionAndStream,
   streamResearch,
 } from "../lib/sse";
-import { createMemory } from "../lib/api";
+import { createMemory, createDocument } from "../lib/api";
 import AgentNetwork from "../components/AgentNetwork";
 import ThinkingTrace from "../components/ThinkingTrace";
 import ContextPanel from "../components/ContextPanel";
@@ -281,7 +281,7 @@ export default function Chat() {
   }
 
   // Simulation fallback for research (when backend unreachable)
-  function simulateResearch(topic: string) {
+  async function simulateResearch(topic: string) {
     const mockQuestions = [
       `Tổng quan thị trường và xu hướng: ${topic.slice(0, 50)}`,
       `Phân tích đối thủ cạnh tranh chính trong lĩnh vực ${topic.slice(0, 30)}`,
@@ -298,6 +298,21 @@ export default function Chat() {
       ...prev,
       phase: "planning",
     }));
+
+    // Try to create a real document in Studio via API
+    const reportTitle = `Nghiên cứu: ${topic.slice(0, 80)}`;
+    const reportContent = `# ${reportTitle}\n\n> Báo cáo nghiên cứu tự động | ${new Date().toLocaleDateString("vi-VN")}\n\n## Tóm tắt\n\nBáo cáo này phân tích chuyên sâu về chủ đề "${topic}" với ${mockQuestions.length} câu hỏi nghiên cứu.\n\n## Nội dung nghiên cứu\n\n${mockQuestions.map((q, i) => `### ${i + 1}. ${q}\n\nĐang chờ backend Agno xử lý để có phân tích chi tiết. Hiện tại đây là bản nháp từ simulation mode.\n`).join("\n")}\n\n## Kết luận\n\nBáo cáo sẽ được cập nhật khi backend Agno xử lý xong pipeline nghiên cứu đầy đủ.`;
+
+    let realDocId: string | null = null;
+    try {
+      const doc = await createDocument({
+        title: reportTitle,
+        content: reportContent,
+      });
+      realDocId = doc.id;
+    } catch {
+      // API failed, use generated UUID
+    }
 
     setTimeout(() => {
       setResearch((prev) => ({
@@ -332,8 +347,8 @@ export default function Chat() {
             setResearch((prev) => ({
               ...prev,
               phase: "done",
-              docId: crypto.randomUUID(),
-              docTitle: `Nghiên cứu: ${topic.slice(0, 80)}`,
+              docId: realDocId || crypto.randomUUID(),
+              docTitle: reportTitle,
               wordCount,
               questionCount: mockQuestions.length,
               elapsedMs: Date.now() - researchStartRef.current,
@@ -955,9 +970,7 @@ export default function Chat() {
               <div className="self-start w-full">
                 <ResearchProgressCard
                   state={research}
-                  onNavigateStudio={() =>
-                    navigate(`/studio?doc=${research.docId || ""}`)
-                  }
+                  onNavigateStudio={() => navigate("/studio")}
                   onClose={closeResearch}
                 />
               </div>
