@@ -13,7 +13,7 @@ const CONFIG = {
   OTP_TTL: 300, // 5 minutes
   RATE_LIMIT_WINDOW: 60, // 1 minute window
   RATE_LIMIT_MAX: 100, // max requests per window
-  TUNNEL_BASE: "https://api.ajinov5.cuong.ngo", // Worker on Edge → Tunnel → VPS Agno
+  TUNNEL_BASE: "http://72.60.210.110:8000", // Worker on Edge → VPS Agno (direct, tunnel WIP)
 };
 
 // ─── BINDINGS TYPE ─────────────────────────────────────
