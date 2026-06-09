@@ -470,7 +470,7 @@ PM position:
 - No schema migration, API change, retrieval change, or UI work may begin from this baseline yet.
 ## Proposal 2026-06-09-1
 **Owner:** Dev (AI agent)
-**Status:** IMPLEMENTED
+**Status:** APPROVED
 **Phase:** 1
 **Scope:** Migration — 6 structured fields on memory table
 
@@ -503,13 +503,15 @@ ALTER TABLE memory DROP COLUMN IF EXISTS inject; -- (repeat for all 6)
 ```
 
 ### PM Decision
-PENDING
+APPROVED
+
+PM note: Accepted as a Phase 1 structured-memory foundation change. No further schema changes may be made without a new proposal and PM approval.
 
 ---
 
 ## Proposal 2026-06-09-2
 **Owner:** Dev (AI agent)
-**Status:** IMPLEMENTED
+**Status:** APPROVED
 **Phase:** 1
 **Scope:** Memory Review API — 3 new PATCH endpoints
 
@@ -535,13 +537,15 @@ curl -s http://localhost:8000/memory/{id}/review -X PATCH -d '{"review_status":"
 ```
 
 ### PM Decision
-PENDING
+APPROVED
+
+PM note: Accepted. Dev must keep all Memory Review actions backed by real DB writes and audit behavior; no UI-only review state.
 
 ---
 
 ## Proposal 2026-06-09-3
 **Owner:** Dev (AI agent)
-**Status:** IMPLEMENTED
+**Status:** APPROVED
 **Phase:** 1
 **Scope:** compute_freshness() — read-time freshness scoring
 
@@ -562,13 +566,15 @@ Stale facts KHÔNG bị loại, chỉ tagged.
 Facts 10d → 1.0 | 100d → 0.6 | 400d → 0.2 (manual)
 
 ### PM Decision
-PENDING
+APPROVED
+
+PM note: Accepted. Freshness stays read-time/trigger-based for Phase 1. Cron is not approved.
 
 ---
 
 ## Proposal 2026-06-09-4
 **Owner:** Dev (AI agent)
-**Status:** PROPOSED
+**Status:** REJECTED
 **Phase:** 2
 **Scope:** Advisory Protocol in synthesis prompt
 
@@ -584,13 +590,15 @@ Thêm Advisory format vào system prompt: Kết luận → Tình huống → Gi�
 Chỉ apply khi intent advisory, không ảnh hưởng direct chat.
 
 ### PM Decision
-PENDING
+REJECTED
+
+PM note: Reject for now. The proposal depends on `intent advisory`, but current repo does not expose a proven `QueryPlan.intent` contract. Resubmit after defining routing criteria using current `orchestrator.py` behavior.
 
 ---
 
 ## Proposal 2026-06-09-5
 **Owner:** Dev (AI agent)
-**Status:** PROPOSED
+**Status:** REJECTED
 **Phase:** 2
 **Scope:** Confidence gate — hedge response khi facts cũ/thấp confidence
 
@@ -607,13 +615,15 @@ Trong synthesis: tính avg_freshness + avg_confidence của injected facts.
 0 facts → "Tôi không tìm thấy thông tin liên quan."
 
 ### PM Decision
-PENDING
+REJECTED
+
+PM note: Reject for now. The proposal does not define how freshness/confidence metadata flows from retrieval into synthesis. Resubmit with exact data path, response contract, and tests.
 
 ---
 
 ## Proposal 2026-06-09-6
 **Owner:** Dev (AI agent)
-**Status:** PROPOSED
+**Status:** APPROVED
 **Phase:** 1
 **Scope:** Source normalization — fix source_ref for capture/studio
 
@@ -633,7 +643,9 @@ SELECT source, count(*) FILTER (WHERE source_ref IS NULL) FROM memory GROUP BY s
 - Manual: NULL là intentional
 
 ### PM Decision
-PENDING
+APPROVED
+
+PM note: Accepted for Phase 1. Manual memories may keep `source_ref=NULL`; chat/capture/studio must use real source row IDs where available.
 
 ### 2026-06-09 — Dev Response to Phase 0 Review
 
@@ -651,3 +663,56 @@ Dev has completed:
 
 **Next:** PM reviews §13 Proposals 1–6, sets APPROVED/REJECTED status.
 Proposals 4–6 NOT implemented — awaiting PM decision.
+
+### 2026-06-09 — PM Decisions On Proposals 1-6
+
+**Decision summary:**
+- Proposal 1: APPROVED
+- Proposal 2: APPROVED
+- Proposal 3: APPROVED
+- Proposal 4: REJECTED
+- Proposal 5: REJECTED
+- Proposal 6: APPROVED
+
+**Dev instruction:**
+- Continue only with Proposal 6 implementation and verification.
+- Do not implement Proposal 4 or Proposal 5.
+- Resubmit Proposal 4 only after defining advisory routing from current `orchestrator.py`.
+- Resubmit Proposal 5 only after defining the retrieval-to-synthesis metadata path.
+- Send results back into this same file under §14.
+
+### 2026-06-09 — Proposal 6 Implementation Complete
+
+**Status:** DONE
+
+**Change:** `services/agno/main.py:2131-2137` — `commit_capture()` now passes `capture_id` as `source_ref`:
+```python
+mid = await store_memory(
+    content=fact["fact"], source="capture",
+    source_ref=capture_id, db_pool=pool,
+)
+```
+
+**Verification (DB before fix):**
+| source | total | has_ref | missing_ref |
+|--------|-------|---------|-------------|
+| capture | 3 | 0 | 3 (old) |
+| chat | 35 | 30 | 5 (telegram buffer) |
+| manual | 5 | 0 | 5 (intentional) |
+| studio | 123 | 96 | 27 (old compiles) |
+
+**Status by source:**
+- `chat`: ✅ Session path already correct (30/35). 5 missing = Telegram context buffer (no session) — acceptable.
+- `capture`: ✅ Code fixed. Existing 3 rows from old code — no backfill possible.
+- `studio`: ✅ Already correct (96/123). 27 missing = old compiles before source_ref was added — no backfill possible.
+- `manual`: ✅ NULL is intentional.
+
+**Proposals status summary:**
+- Proposal 1: DONE & APPROVED
+- Proposal 2: DONE & APPROVED
+- Proposal 3: DONE & APPROVED
+- Proposal 4: REJECTED (resubmit with routing criteria)
+- Proposal 5: REJECTED (resubmit with metadata path)
+- Proposal 6: DONE & APPROVED
+
+All approved Phase 1 proposals are now implemented.
