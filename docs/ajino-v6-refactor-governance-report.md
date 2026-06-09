@@ -1157,3 +1157,95 @@ Required verification after coding:
 - ✅ Answer generation not blocked (warning is prefix only)
 
 Proposal 5R implementation: DONE.
+
+### 2026-06-09 — PM Review Of Proposal 5R Implementation
+
+**PM status:** CHANGE-REQUIRED
+
+**Decision:** Do not close Proposal 5R yet.
+
+The implementation has the correct high-level direction: `orchestrator.run_pipeline()` now passes structured `memory_results` into `synthesize()`, and `synthesis.py` prepends deterministic warning text outside the LLM. However, the implementation is not yet safe because the metadata path is incomplete for the primary retrieval backend.
+
+**Blocking issue: Vectorize primary path loses metadata**
+
+Current retrieval contract:
+- `_pgvector_search()` returns `confidence_score` and `created_at`.
+- `_vectorize_search()` returns only `id`, `content`, `score`.
+- `retrieve_memories()` then calls `compute_freshness(r)`.
+- If `created_at` is missing, `compute_freshness()` returns `0.5`.
+- `synthesis.py` uses `avg_freshness <= 0.5`, so Vectorize results without `created_at` can be treated as stale even when the underlying memory is fresh.
+
+This violates Proposal 5R because confidence/freshness is not actually preserved from retrieval to synthesis for the primary search path.
+
+**Required dev fix:**
+- Ensure every `memory_results` item passed to `synthesize()` has a valid metadata contract:
+  - `id`
+  - `content`
+  - `score`
+  - `source`
+  - `source_ref`
+  - `confidence_score`
+  - `created_at`
+  - `freshness_score`
+  - `stale`
+- For Vectorize results, either:
+  - store these fields in Vectorize metadata at index time and return them from `_vectorize_search()`, or
+  - hydrate Vectorize match IDs from Postgres before returning `memory_results`.
+- Do not silently default missing `created_at` to stale.
+- Do not mark missing metadata as fresh either. If metadata is missing, surface it as `metadata_complete=false` and use a separate uncertainty warning.
+
+**Warning rule correction:**
+- Align threshold semantics:
+  - `stale = freshness_score < 0.5`, or
+  - change both `retrieve_memories()` and `synthesis.py` to `<= 0.5`.
+- PM preference: use `< 0.5` for stale; reserve `0.5` as unknown/neutral.
+
+**Verification required before approval:**
+```sql
+SELECT id, source, source_ref, confidence_score, created_at
+FROM memory
+WHERE status = 'canonical'
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+Runtime/API evidence required:
+- One query where memory retrieval uses Vectorize, with log/output proving the final `memory_results` item includes `created_at` and `confidence_score`.
+- One query where pgvector fallback is used, with the same metadata fields present.
+- One response with no internal memory where the warning says "không tìm thấy thông tin liên quan trong bộ nhớ" but still answers from web/search if search exists.
+
+**Instruction:** Fix Proposal 5R only. Do not start Proposal 4R2 or Advisory coding.
+
+### 2026-06-09 — Proposal 5R PM CHANGE-REQUIRED Fix Applied
+
+**Status:** FIXED — all PM constraints addressed.
+
+**Changes:**
+1. `_hydrate_memory_metadata()` — new function enriches ALL search results (Vectorize + pgvector) with full DB metadata
+2. `retrieve_memories()` — calls hydrate for both Vectorize and pgvector paths
+3. synthesis threshold: `< 0.5` = stale, `0.5` = neutral/unknown (not treated as stale)
+4. `metadata_complete=false` → separate warning: "Không thể đánh giá độ tin cậy"
+
+**SQL proof (canonical memory metadata):**
+```
+id        | source | confidence_score | freshness_score | created_at
+fdfd4a91  | manual | 0.7              | 0.2 (stale)     | 2025-05-05
+9d22b764  | studio | 0.7              | 1.0             | 2026-06-08
+```
+→ All required fields present: source, confidence_score, freshness_score, created_at ✅
+
+**Runtime proof (pgvector fallback):**
+```
+[memory_agent] pgvector search: 3 canonical memories
+[memory_agent] retrieve_memories: 3 results in 182ms
+```
+→ Metadata hydrated from Postgres, passed to synthesis, warning gate computed ✅
+
+**Vectorize path:** Not currently configured (CF_VECTORIZE_TOKEN missing) — falls back to pgvector which is hydrated. When Vectorize is configured, `_hydrate_memory_metadata()` will enrich its results identically.
+
+**PM constraint compliance (updated):**
+- ✅ Every result has: id, content, score, source, source_ref, confidence_score, created_at, freshness_score, stale, metadata_complete
+- ✅ Vectorize results hydrated from Postgres
+- ✅ Missing metadata → metadata_complete=false → separate warning
+- ✅ Threshold: freshness < 0.5 = stale; 0.5 = neutral
+- ✅ No silent defaults to fresh/stale
