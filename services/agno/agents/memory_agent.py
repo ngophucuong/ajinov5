@@ -246,6 +246,7 @@ async def store_memory(
     content: str,
     source: str = "manual",
     source_ref: Optional[str] = None,
+    metadata: str = "{}",
     db_pool: Optional[asyncpg.Pool] = None,
 ) -> Optional[str]:
     """
@@ -265,13 +266,14 @@ async def store_memory(
             row = await conn.fetchrow(
                 """
                 INSERT INTO memory (content, embedding, status, source, source_ref, metadata)
-                VALUES ($1, $2::vector, 'pending', $3, $4::uuid, '{}')
+                VALUES ($1, $2::vector, 'pending', $3, $4::uuid, $5::jsonb)
                 RETURNING id
                 """,
                 content,
                 vec_str,
                 source,
                 source_ref,
+                metadata,
             )
             memory_id = str(row["id"])
             print(f"[memory_agent] Stored memory {memory_id}: {content[:60]}...")

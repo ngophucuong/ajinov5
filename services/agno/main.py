@@ -666,6 +666,10 @@ async def _persist_chat_and_extract_memory(
 
     from agents.memory_agent import store_memory
 
+    # PM: chat source_ref must be chat_messages.id (not chat_sessions.id)
+    assistant_message_id = str(assistant_row["id"])
+    candidate_metadata = json.dumps({"session_id": session_id})
+
     candidates = result.get("memory_candidates", [])
     stored_count = 0
     try:
@@ -673,7 +677,8 @@ async def _persist_chat_and_extract_memory(
             memory_id = await store_memory(
                 content=c["content"],
                 source="chat",
-                source_ref=session_id,
+                source_ref=assistant_message_id,
+                metadata=candidate_metadata,
                 db_pool=pool,
             )
             if memory_id:
@@ -684,7 +689,7 @@ async def _persist_chat_and_extract_memory(
         print(f"[chat] Memory extraction warning (best-effort): {e}")
 
     return {
-        "assistant_message_id": str(assistant_row["id"]),
+        "assistant_message_id": assistant_message_id,
         "stored_memory_count": stored_count,
         "session_id": session_id,
     }
