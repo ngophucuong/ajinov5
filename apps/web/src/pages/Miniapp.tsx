@@ -31,6 +31,7 @@ declare global {
         ready: () => void;
         expand: () => void;
         enableClosingConfirmation: () => void;
+        initData: string;
         initDataUnsafe: {
           user?: { id: number; first_name: string; username?: string };
         };
