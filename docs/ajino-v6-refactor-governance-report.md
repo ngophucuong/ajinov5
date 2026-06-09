@@ -791,3 +791,65 @@ curl -X POST http://localhost:8000/studio/documents/{id}/compile
 - Proposal 6: ✅ Source normalization, all 3 flows verified at runtime
 
 All approved Phase 1 proposals are implemented and runtime-verified.
+
+### 2026-06-09 — PM Decision On Chat `source_ref`
+
+**PM status:** CHANGE-REQUIRED
+
+**Decision:** Chat `source_ref` must point to `chat_messages.id`, not `chat_sessions.id`.
+
+**Reasoning:**
+- `source_ref` is the immediate provenance pointer for a memory row.
+- For `source='chat'`, the immediate source is the specific message that produced or justified the memory.
+- `chat_sessions.id` is useful as parent context, but it is too coarse for audit, memory review, conflict resolution, and future deletion/rewrite workflows.
+- One session can contain many topics; using session-level provenance makes it impossible to know which exact user/assistant turn created a memory.
+
+**Required dev action:**
+- Change new chat memory writes so `memory.source='chat'` and `memory.source_ref = chat_messages.id`.
+- Preserve session-level context separately, preferably in `memory.metadata.session_id`.
+- If the current write path creates memories before the assistant message row exists, change ordering so the assistant `chat_messages` row is created first, then extracted memories are written with that `message_id`.
+- Do not add a new DB column for this unless separately proposed.
+- Do not backfill old chat rows by guessing. Existing rows that point to `chat_sessions.id` may remain legacy unless there is a deterministic mapping to a specific `chat_messages.id`.
+
+**Verification required:**
+```sql
+SELECT
+  m.id AS memory_id,
+  m.source,
+  m.source_ref,
+  cm.id AS matched_message_id,
+  cs.id AS matched_session_id,
+  m.metadata
+FROM memory m
+LEFT JOIN chat_messages cm ON cm.id = m.source_ref
+LEFT JOIN chat_sessions cs ON cs.id = (m.metadata->>'session_id')::uuid
+WHERE m.source = 'chat'
+ORDER BY m.created_at DESC
+LIMIT 10;
+```
+
+**Acceptance rule:**
+- For new chat rows, `matched_message_id` must not be NULL.
+- For new chat rows, `metadata.session_id` should be present when available.
+- `source_ref = chat_sessions.id` is rejected for new writes.
+
+**Phase status:** Phase 1 remains open until this correction is implemented and runtime-verified.
+
+### 2026-06-09 — Chat source_ref Correction Implemented & Verified
+
+**Status:** DONE — PM directive implemented.
+
+**Changes:**
+- `memory_agent.py:store_memory()` → added `metadata` parameter (default `'{}'`)
+- `main.py:_persist_chat_and_extract_memory()` → uses `assistant_message_id` as `source_ref`, stores `session_id` in `metadata.session_id`
+
+**SQL verification:**
+```
+memory_id | source_ref (chat_messages.id) | matched_message_id | metadata.session_id
+94067f76  | e35bb376-...                  | e35bb376-... ✅     | 21c32c1a-... ✅
+d4dd41a0  | e35bb376-...                  | e35bb376-... ✅     | 21c32c1a-... ✅
+```
+→ New rows: `matched_message_id IS NOT NULL` ✅
+→ Old rows: source_ref still points to old session IDs (not backfilled per PM) ✅
+
+**Phase 1 status: All approved proposals DONE + VERIFIED.**
