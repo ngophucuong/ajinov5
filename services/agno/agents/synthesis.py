@@ -33,16 +33,24 @@ async def synthesize(
         if len(memory_results) == 0:
             confidence_warning = "Tôi không tìm thấy thông tin liên quan trong bộ nhớ."
         else:
-            freshness_scores = [r.get("freshness_score", 1.0) for r in memory_results]
-            confidence_scores = [r.get("confidence_score", 0.7) for r in memory_results]
-            avg_freshness = sum(freshness_scores) / len(freshness_scores)
-            avg_confidence = sum(confidence_scores) / len(confidence_scores)
-            if avg_freshness <= 0.5:
+            complete = [r for r in memory_results if r.get("metadata_complete", False)]
+            if not complete:
                 confidence_warning += (
-                    "⚠️ Một số thông tin tôi dùng có thể đã cũ (> 6 tháng). "
+                    "⚠️ Không thể đánh giá độ tin cậy của một số thông tin. "
                 )
-            if avg_confidence <= 0.6:
-                confidence_warning += "⚠️ Tôi không chắc hoàn toàn — nên kiểm tra lại."
+            else:
+                freshness_scores = [r.get("freshness_score", 1.0) for r in complete]
+                confidence_scores = [r.get("confidence_score", 0.7) for r in complete]
+                avg_freshness = sum(freshness_scores) / len(freshness_scores)
+                avg_confidence = sum(confidence_scores) / len(confidence_scores)
+                if avg_freshness < 0.5:
+                    confidence_warning += (
+                        "⚠️ Một số thông tin tôi dùng có thể đã cũ (> 6 tháng). "
+                    )
+                if avg_confidence < 0.6:
+                    confidence_warning += (
+                        "⚠️ Tôi không chắc hoàn toàn — nên kiểm tra lại."
+                    )
 
     context = ""
     if search_results:

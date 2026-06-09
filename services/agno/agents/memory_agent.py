@@ -156,6 +156,73 @@ async def _vectorize_search(embedding: list[float], top_k: int = 7) -> list[dict
     return []
 
 
+async def _hydrate_memory_metadata(
+    results: list[dict], db_pool: asyncpg.Pool
+) -> list[dict]:
+    """
+    Hydrate memory search results with full metadata from Postgres.
+    Ensures every result has: id, content, score, source, source_ref,
+    confidence_score, created_at, freshness_score, stale, metadata_complete.
+    """
+    if not results or not db_pool:
+        return results
+
+    ids = [r["id"] for r in results if r.get("id")]
+    if not ids:
+        return results
+
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, content, source, source_ref,
+                       confidence_score, created_at, freshness_score,
+                       inject, review_status, fact_type
+                FROM memory
+                WHERE id = ANY($1::uuid[])
+                """,
+                ids,
+            )
+            row_map = {str(r["id"]): dict(r) for r in rows}
+
+            enriched = []
+            for r in results:
+                rid = r.get("id", "")
+                db_row = row_map.get(rid)
+                if db_row:
+                    # Merge vector score with DB metadata
+                    enriched.append(
+                        {
+                            "id": rid,
+                            "content": db_row.get("content", r.get("content", "")),
+                            "score": r.get("score", 0),
+                            "source": db_row.get("source", ""),
+                            "source_ref": str(db_row["source_ref"])
+                            if db_row.get("source_ref")
+                            else None,
+                            "confidence_score": float(
+                                db_row.get("confidence_score", 0.7)
+                            ),
+                            "created_at": db_row.get("created_at"),
+                            "freshness_score": compute_freshness(db_row),
+                            "stale": compute_freshness(db_row) < 0.5,
+                            "metadata_complete": True,
+                        }
+                    )
+                else:
+                    r["metadata_complete"] = False
+                    r["confidence_score"] = r.get("confidence_score", 0.5)
+                    r["freshness_score"] = compute_freshness(r)
+                    r["stale"] = False
+                    enriched.append(r)
+            return enriched
+    except Exception as e:
+        print(f"[memory_agent] hydrate error: {e}")
+        for r in results:
+            r["metadata_complete"] = False
+        return results
+
+
 # ─── pgvector (Fallback) ─────────────────────────────────
 
 
@@ -225,15 +292,18 @@ async def retrieve_memories(
     # Try Vectorize first (PRIMARY)
     results = await _vectorize_search(embedding, top_k)
 
+    # Hydrate Vectorize results with full DB metadata (PM: must include all fields)
+    if results and db_pool:
+        results = await _hydrate_memory_metadata(results, db_pool)
+
     # Fallback to pgvector
     if not results and db_pool:
         results = await _pgvector_search(embedding, top_k, db_pool)
+        # Hydrate pgvector results too for consistent metadata contract
+        if results:
+            results = await _hydrate_memory_metadata(results, db_pool)
 
-    # v6: enrich with computed freshness + confidence
-    for r in results:
-        r["freshness_score"] = compute_freshness(r)
-        r["stale"] = r["freshness_score"] < 0.5
-        r["confidence_score"] = r.get("confidence_score", 0.7)
+    # v6: metadata enrichment done by _hydrate_memory_metadata above
 
     elapsed = int((time.time() - t0) * 1000)
     print(f"[memory_agent] retrieve_memories: {len(results)} results in {elapsed}ms")
