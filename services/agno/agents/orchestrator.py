@@ -44,6 +44,49 @@ def query_complexity(text: str) -> Literal["fast", "deep"]:
     return "fast"
 
 
+# ─── v6 Advisory Routing (Proposal 4R2) ────────────────
+ADVISORY_FOLLOWUP_TYPES = {"expand", "compare", "continue"}
+
+
+def is_advisory_query(
+    resolved_query: str,
+    mode: str,
+    dialogue_state: dict | None = None,
+) -> bool:
+    """
+    Determine if response should use Advisory output format.
+    Rules (PM-approved):
+    1. mode MUST be "deep"
+    2. resolved_query contains analytical keyword → Advisory
+    3. Follow-up: followup_type in {expand, compare, continue}
+       AND (resolved_query OR active_topic OR user_intent
+            OR referenced_points) has analytical cue
+    Memory presence NEVER triggers Advisory.
+    """
+    if mode != "deep":
+        return False
+
+    # Rule 2: analytical keyword in resolved query
+    if any(kw in resolved_query.lower() for kw in ANALYTICAL_KEYWORDS):
+        return True
+
+    # Rule 3: follow-up inheritance with analytical cue
+    if dialogue_state:
+        followup_type = dialogue_state.get("followup_type", "")
+        if followup_type in ADVISORY_FOLLOWUP_TYPES:
+            check_fields = [
+                dialogue_state.get("resolved_query", ""),
+                dialogue_state.get("active_topic", ""),
+                dialogue_state.get("user_intent", ""),
+                " ".join(dialogue_state.get("referenced_points", [])),
+            ]
+            combined = " ".join(check_fields).lower()
+            if any(kw in combined for kw in ANALYTICAL_KEYWORDS):
+                return True
+
+    return False
+
+
 def determine_mode(text: str, requested_mode: str) -> tuple[str, str]:
     """Returns (reasoning_mode, model_name)"""
     if requested_mode == "auto":
@@ -268,6 +311,9 @@ async def run_pipeline(
     t3 = time.time()
     from .synthesis import synthesize
 
+    # v6 Advisory Routing (Proposal 4R2)
+    is_advisory = is_advisory_query(resolved_query, mode, dialogue_state)
+
     response = await synthesize(
         user_message=message,
         resolved_query=resolved_query,
@@ -281,6 +327,7 @@ async def run_pipeline(
         telegram_context=telegram_context,
         conversation_history=conversation_history,
         dialogue_state=dialogue_state,
+        is_advisory=is_advisory,
     )
 
     thinking_trace.append(

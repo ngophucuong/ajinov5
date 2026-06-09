@@ -24,6 +24,7 @@ async def synthesize(
     telegram_context: dict = None,
     conversation_history: str = "",
     dialogue_state: dict | None = None,
+    is_advisory: bool = False,
 ) -> dict:
     """Generate final response with context."""
 
@@ -105,6 +106,24 @@ async def synthesize(
 
     # v6: confidence warning is prepended directly to response (not via LLM)
     # See line ~150 for the prepend logic
+
+    # v6 Advisory Protocol (Proposal 4R2) — system instruction only, not forced
+    if is_advisory:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Đây là câu hỏi cần phân tích chuyên sâu. "
+                    "Hãy trả lời theo định dạng sau (ưu tiên, không bắt buộc tuyệt đối):\n\n"
+                    "**Kết luận:** [1-2 câu tổng kết]\n\n"
+                    "**Tình huống:** [tóm tắt bối cảnh từ dữ liệu]\n\n"
+                    "**Giả định của tôi:**\n- [giả định 1]\n- [giả định 2]\n\n"
+                    "**Phân tích:** [phân tích đa chiều, dùng dữ liệu tham khảo]\n\n"
+                    "**Rủi ro cần lưu ý:**\n- [rủi ro 1]\n\n"
+                    "**Điều tôi chưa chắc:**\n- [điểm chưa rõ, cần xác minh thêm]"
+                ),
+            }
+        )
 
     if context:
         messages.append({"role": "system", "content": f"Dữ liệu tham khảo:\n{context}"})
