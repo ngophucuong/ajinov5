@@ -179,6 +179,70 @@ Purpose: this file is the compact PM/dev diff for Phase 2 decisions. Dev should 
 + - No mock runtime proof.
 ```
 
+## PM No-New-Evidence Gate
+
+```diff
+@@ Current Phase 2 state
++ PM status: WAITING-ON-DEV-FIX
++ Decision: no new PM decision is possible yet.
++
++ Reason:
++ - No new implementation diff for `services/agno/agents/synthesis.py`.
++ - No new proof for partial metadata warning cases.
++
++ Dev must submit before asking PM again:
++ - Exact `synthesis.py` code diff.
++ - Unit proof: `[complete, incomplete]` emits metadata uncertainty warning.
++ - Unit proof: `[complete, complete]` does not emit metadata uncertainty warning.
++ - Unit proof: `[incomplete, incomplete]` emits metadata uncertainty warning and
++   does not divide by zero.
++ - One normal runtime chat output proving answer generation still works.
++
++ Allowed work:
++ - Only Proposal 5R partial-metadata warning fix.
++
++ Blocked work:
++ - Advisory/4R2.
++ - Retrieval ranking changes.
++ - Memory schema changes.
++ - UI changes.
++ - Deep Research changes.
+```
+
+## PM Re-Review Diff For Commit `d6114d1`
+
+```diff
+@@ Proposal 5R partial metadata fix
+- PM status: WAITING-ON-DEV-FIX
++ PM status: APPROVED
++ Decision: Proposal 5R is closed.
++
++ Reviewed commit:
++ - `d6114d1efad241169bba41d5a5b1f3afb4e5f2df`
++
++ Accepted:
++ - `incomplete_count = len(memory_results) - len(complete)` is implemented.
++ - Any incomplete metadata row now emits uncertainty warning.
++ - Freshness/confidence averages are computed only when `complete` is non-empty.
++ - `[complete, incomplete]` => warning.
++ - `[complete, complete]` => no metadata warning.
++ - `[incomplete, incomplete]` => warning and no divide-by-zero.
++ - Answer generation remains non-blocking.
++
++ Accepted verification debt:
++ - Runtime Vectorize proof is deferred because `CF_VECTORIZE_TOKEN` is not configured.
++ - Before relying on Vectorize in production, dev must run one Vectorize query proving
++   hydrated `created_at` and `confidence_score`.
+```
+
+## Current PM Gate After `d6114d1`
+
+- Proposal 5R: `CLOSED / APPROVED`.
+- Proposal 4R: still `REJECTED`.
+- Advisory coding: still blocked.
+- Dev next action: submit `Proposal 2026-06-09-4R2 — Advisory Routing Contract`.
+- Do not write Advisory code until PM explicitly approves `4R2`.
+
 ## Dev Fix Applied — 2026-06-09
 
 ```diff
@@ -250,7 +314,7 @@ Purpose: this file is the compact PM/dev diff for Phase 2 decisions. Dev should 
 
 ## Proposal 2026-06-09-4R2 — Advisory Protocol v2 (prepared while awaiting 5R review)
 
-**Status:** PROPOSED
+**Status:** APPROVED-WITH-CONSTRAINTS
 **Phase:** 2
 
 ### is_advisory_query() Contract (exact, from current code)
@@ -338,4 +402,235 @@ Only when `is_advisory=True`. Appended as system instruction:
 Remove `is_advisory` param, revert prompt.
 
 ### PM Decision
-PENDING
+APPROVED-WITH-CONSTRAINTS
+
+PM approves Advisory implementation only under the constraints below.
+
+**Required routing correction:**
+- Keep Rule 1: `mode` must be `"deep"`.
+- Keep Rule 2: analytical keyword in `resolved_query` returns `True`.
+- Correct Rule 3: follow-up inheritance must not use `active_topic` existence alone.
+- Follow-up may inherit Advisory only when `followup_type in {"expand", "compare", "continue"}` and at least one of `resolved_query`, `active_topic`, `user_intent`, or `referenced_points` contains an advisory/analytical cue.
+- Memory presence must never trigger Advisory format.
+
+**Approved implementation shape:**
+```python
+def _has_advisory_signal(text: str) -> bool:
+    text_l = (text or "").lower()
+    return any(kw in text_l for kw in ANALYTICAL_KEYWORDS)
+
+def is_advisory_query(
+    resolved_query: str,
+    mode: str,
+    dialogue_state: dict | None = None,
+) -> bool:
+    if mode != "deep":
+        return False
+
+    if _has_advisory_signal(resolved_query):
+        return True
+
+    if dialogue_state and dialogue_state.get("followup_type") in {"expand", "compare", "continue"}:
+        context_text = " ".join([
+            dialogue_state.get("active_topic", ""),
+            dialogue_state.get("user_intent", ""),
+            " ".join(dialogue_state.get("referenced_points", [])),
+        ])
+        return _has_advisory_signal(context_text)
+
+    return False
+```
+
+**Prompt contract correction:**
+- `is_advisory=True` must use mandatory wording, not soft guidance.
+- Required Vietnamese sections:
+  - `Kết luận`
+  - `Tình huống`
+  - `Giả định của tôi`
+  - `Phân tích`
+  - `Rủi ro cần lưu ý`
+  - `Điều tôi chưa chắc`
+- If data is insufficient for a section, write that uncertainty explicitly. Do not drop the section.
+
+**Allowed files:**
+- `services/agno/agents/orchestrator.py`
+- `services/agno/agents/synthesis.py`
+
+**Not allowed:**
+- Do not change memory retrieval.
+- Do not change Confidence/Freshness Gate.
+- Do not change Deep Research.
+- Do not change UI.
+- Do not add DB columns.
+
+**Required verification after coding:**
+- Unit proof for `is_advisory_query()`:
+  - deep + analytical keyword => `True`
+  - fast + analytical keyword => `False`
+  - deep + factual/new_topic/no cue => `False`
+  - deep + follow-up with advisory cue in `referenced_points` => `True`
+  - deep + follow-up with only `active_topic` but no advisory cue => `False`
+  - memory exists but no advisory cue => `False`
+- Runtime proof:
+  - one Advisory answer contains all six sections.
+  - one factual deep answer does not use Advisory sections.
+  - one fast answer does not use Advisory sections.
+
+**PM gate after this decision:**
+- Dev may implement 4R2 under the constraints above.
+- Any broader routing, UI, retrieval, schema, or Deep Research work requires a new proposal.
+
+## PM Review Diff After 4R2 Implementation
+
+```diff
+@@ 4R2 implementation
+- PM status: awaiting review
++ PM status: CHANGE-REQUIRED
++ Decision: routing accepted, format enforcement rejected.
++
++ Accepted:
++ - `is_advisory_query()` follows constrained routing.
++ - Memory presence does not trigger Advisory.
++ - Deep mode + analytical cue triggers Advisory.
++ - Follow-up inheritance requires analytical cue and does not rely on `active_topic` alone.
++
++ Blocking issue:
++ - `synthesis.py` says: "ưu tiên, không bắt buộc tuyệt đối".
++ - Runtime Advisory response produced only 4/6 required sections.
++ - PM contract requires all six sections whenever `is_advisory=True`.
++
++ Required fix:
++ - Keep routing unchanged unless a unit test fails.
++ - Replace soft guidance with mandatory instruction in `synthesis.py`.
++ - Add deterministic post-generation enforcement:
++   Required headings:
++   - `Kết luận`
++   - `Tình huống`
++   - `Giả định của tôi`
++   - `Phân tích`
++   - `Rủi ro cần lưu ý`
++   - `Điều tôi chưa chắc`
++ - If a heading is missing, append it with:
++   `Chưa đủ dữ liệu để kết luận chắc chắn.`
++ - Do not rely only on prompt wording.
++
++ Allowed file:
++ - `services/agno/agents/synthesis.py`
++
++ Blocked:
++ - No memory retrieval changes.
++ - No Confidence/Freshness Gate changes.
++ - No Deep Research/UI/DB schema changes.
++
++ Required verification:
++ - Unit: 6/6 input remains unchanged.
++ - Unit: 4/6 input becomes 6/6.
++ - Unit: 0/6 input becomes 6/6.
++ - Runtime: Advisory answer has all six sections.
++ - Runtime: factual deep answer has no Advisory sections.
++ - Runtime: fast answer has no Advisory sections.
+```
+
+## Current PM Gate After 4R2 Review
+
+- 4R2 routing: accepted.
+- 4R2 format enforcement: `CHANGE-REQUIRED`.
+- Dev next action: fix only `services/agno/agents/synthesis.py`.
+
+## PM Re-Review Diff For Commit `25ea2d8`
+
+```diff
+@@ 4R2 mandatory format fix
++ Reviewed commit:
++ - `25ea2d8b2f4473c30dde050d8eef48190a8473b9`
++
++ Accepted:
++ - Soft guidance was removed.
++ - Prompt now says `BẮT BUỘC`.
++ - Six sections are listed in order.
++ - Reported runtime now produces 6/6 sections.
++
++ Still rejected:
++ - There is no deterministic post-generation enforcement.
++ - `synthesis.py` still relies only on the LLM following the prompt.
++
++ Required fix:
++ - Add helper in `services/agno/agents/synthesis.py`.
++ - Required headings:
++   - `Kết luận`
++   - `Tình huống`
++   - `Giả định của tôi`
++   - `Phân tích`
++   - `Rủi ro cần lưu ý`
++   - `Điều tôi chưa chắc`
++ - If `is_advisory=True` and a heading is missing, append:
++   `**<heading>:** Chưa đủ dữ liệu để kết luận chắc chắn.`
++ - Call helper after receiving LLM `content` and before returning response.
++ - Do not change routing.
++ - Do not change Confidence/Freshness Gate.
++
++ Required proof:
++ - 6/6 input remains unchanged.
++ - 4/6 input becomes 6/6.
++ - 0/6 input becomes 6/6.
++ - Runtime Advisory response has 6/6 sections.
++ - Runtime factual deep response has no Advisory sections.
++ - Runtime fast response has no Advisory sections.
+```
+
+## Current PM Gate After `25ea2d8`
+
+- 4R2 prompt wording: accepted.
+- 4R2 deterministic enforcement: `CHANGE-REQUIRED`.
+- Allowed file: `services/agno/agents/synthesis.py`.
+
+## PM Final Review Diff For 4R2 Enforcement
+
+```diff
+@@ Proposal 4R2 enforcement fix
+- PM status: CHANGE-REQUIRED
++ PM status: APPROVED
++ Decision: Proposal 4R2 is closed.
++
++ Reviewed:
++ - `326d45226e1e8589170937e806135d41dbe29008`
++   deterministic post-generation Advisory section enforcement.
++ - `fbfcd19`
++   unit + runtime verification evidence.
++
++ Accepted:
++ - `enforce_advisory_sections(content)` exists in `synthesis.py`.
++ - Enforcement runs only when `is_advisory=True`.
++ - Missing Advisory headings are appended after LLM generation.
++ - Existing content is not rewritten.
++ - 6/6, 4/6, and 0/6 section cases are covered.
++ - Advisory runtime response has 6/6 sections.
++ - Factual deep and fast runtime responses do not receive Advisory sections.
++
++ Accepted minor deviation:
++ - Placeholder text is not exactly `Chưa đủ dữ liệu để kết luận chắc chắn.`
++ - PM accepts current per-section Vietnamese placeholders because they clearly state
++   insufficient/unknown data and preserve required sections.
+```
+
+## Phase 2 Final Status
+
+- Proposal 5R: `CLOSED / APPROVED`.
+- Proposal 4R2: `CLOSED / APPROVED`.
+- Remaining verification debt: Vectorize runtime proof after `CF_VECTORIZE_TOKEN` is configured.
+- New changes to Advisory routing/output, retrieval, schema, UI, or Deep Research require a new proposal.
+
+## Phase 2 Final — CLOSED
+
+**PM Decision:** Both 5R and 4R2 APPROVED. Phase 2 closed.
+
+| Proposal | Final Status |
+|----------|:------------:|
+| 5R — Confidence & Freshness Gate | ✅ APPROVED / CLOSED |
+| 4R2 — Advisory Routing + Format | ✅ APPROVED / CLOSED |
+
+**v6 scope complete:**
+- Phase 1: Structured memory, Memory Review API, source normalization, freshness
+- Phase 2: Confidence gate, Advisory routing, deterministic format enforcement
+
+**Next:** Phase 3+ blocked until new governance scope.

@@ -1655,3 +1655,68 @@ ADVISORY_SECTIONS = [
 3. Deep+factual: 0/6 (no enforcement) ✅
 
 **Enforcement is deterministic:** never relies on LLM. Always appends missing sections with placeholder text. Does not modify existing content.
+
+### 2026-06-09 — PM Re-Review Of 4R2 Enforcement Fix
+
+**PM status:** APPROVED
+
+**Decision:** Proposal 4R2 is closed.
+
+PM reviewed:
+- `326d45226e1e8589170937e806135d41dbe29008` — deterministic post-generation Advisory section enforcement.
+- `fbfcd19` — unit + runtime verification evidence.
+
+**Accepted:**
+- `enforce_advisory_sections(content)` exists in `services/agno/agents/synthesis.py`.
+- Enforcement runs only when `is_advisory=True`.
+- Missing Advisory headings are appended after LLM generation.
+- Existing content is not rewritten.
+- 6/6, 4/6, and 0/6 section cases are covered by submitted proof.
+- Runtime proof shows Advisory response has 6/6 sections.
+- Runtime proof shows factual deep and fast responses do not receive Advisory sections.
+
+**Accepted minor deviation:**
+- Placeholder text is not exactly `Chưa đủ dữ liệu để kết luận chắc chắn.`
+- PM accepts the current per-section Vietnamese placeholders because they preserve the required section and state insufficient/unknown data clearly.
+
+**Phase 2 status:**
+- Proposal 5R: CLOSED / APPROVED.
+- Proposal 4R2: CLOSED / APPROVED.
+
+**Remaining verification debt:**
+- Vectorize runtime proof remains deferred until `CF_VECTORIZE_TOKEN` is configured.
+
+**Next PM gate:**
+- Phase 2 is closed for the approved scope.
+- Any new change to Advisory routing, output contract, retrieval, memory schema, UI, or Deep Research requires a new proposal.
+
+### 2026-06-09 — PM Final: Phase 2 CLOSED
+
+**Decision:** Both Proposal 5R and 4R2 are APPROVED. Phase 2 closed.
+
+**Phase 2 deliverables:**
+| Proposal | Scope | Status |
+|----------|-------|:------:|
+| 5R | Confidence & Freshness Gate | ✅ CLOSED |
+| 4R2 | Advisory Routing + Format Enforcement | ✅ CLOSED |
+
+**Production changes:**
+- `memory_agent.py`: `_hydrate_memory_metadata()`, pgvector returns full metadata
+- `orchestrator.py`: `is_advisory_query()` routing, passes `memory_results` + `is_advisory`
+- `synthesis.py`: Confidence/freshness gate, Advisory format enforcement, 6-section output
+- `main.py`: Memory Review API (3 endpoints), source normalization, chat source_ref fix
+- DB: 6 structured columns on `memory` (Phase 1)
+
+**Verification debt:**
+- Vectorize runtime proof deferred (CF_VECTORIZE_TOKEN not configured)
+
+**v6 scope delivered:**
+- ✅ Structured memory foundation (6 fields)
+- ✅ Memory Review API
+- ✅ Source tracking normalization
+- ✅ Read-time freshness scoring
+- ✅ Confidence/freshness gate
+- ✅ Advisory Routing + deterministic format enforcement
+- ❌ Graph / entity nodes / insight engine / Deep Research (out of scope)
+
+**Phase 3+:** Blocked until PM creates new governance scope.
