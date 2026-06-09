@@ -17,7 +17,8 @@ function ModeBadge({ mode }: { mode: ReasoningMode }) {
       : mode === "auto"
         ? "bg-[rgba(212,160,90,0.08)] text-[#d4a05a] border-[rgba(212,160,90,0.2)]"
         : "bg-[rgba(0,200,164,0.06)] text-[#00c8a4] border-[rgba(0,200,164,0.2)]";
-  const label = mode === "deep" ? "◉ Deep" : mode === "auto" ? "◎ Auto" : "⚡ Fast";
+  const label =
+    mode === "deep" ? "◉ Deep" : mode === "auto" ? "◎ Auto" : "⚡ Fast";
 
   return (
     <span
@@ -29,11 +30,20 @@ function ModeBadge({ mode }: { mode: ReasoningMode }) {
   );
 }
 
-export default function ThinkingTrace({ steps, reasoningMode, isStreaming, elapsedMs }: Props) {
+export default function ThinkingTrace({
+  steps,
+  reasoningMode,
+  isStreaming,
+  elapsedMs,
+}: Props) {
   const [open, setOpen] = useState(true);
 
-  const totalMs = steps.reduce((sum, s) => sum + (s.duration_ms || 0), 0);
-  const totalSec = elapsedMs ? (elapsedMs / 1000).toFixed(1) : (totalMs / 1000).toFixed(1);
+  const totalMs = Array.isArray(steps)
+    ? steps.reduce((sum, s) => sum + (s.duration_ms || 0), 0)
+    : 0;
+  const totalSec = elapsedMs
+    ? (elapsedMs / 1000).toFixed(1)
+    : (totalMs / 1000).toFixed(1);
 
   return (
     <div
@@ -84,7 +94,10 @@ export default function ThinkingTrace({ steps, reasoningMode, isStreaming, elaps
           style={{ borderTop: "0.5px solid rgba(255,255,255,0.05)" }}
         >
           {steps.map((step, i) => (
-            <div key={i} className="flex items-start gap-2 text-[11px] font-mono">
+            <div
+              key={i}
+              className="flex items-start gap-2 text-[11px] font-mono"
+            >
               <span
                 className={`flex-shrink-0 leading-relaxed ${
                   step.status === "done"
@@ -94,13 +107,21 @@ export default function ThinkingTrace({ steps, reasoningMode, isStreaming, elaps
                       : "text-[#e06868]"
                 }`}
               >
-                {step.status === "done" ? "✓" : step.status === "running" ? "◉" : "✗"}
+                {step.status === "done"
+                  ? "✓"
+                  : step.status === "running"
+                    ? "◉"
+                    : "✗"}
               </span>
               <span className="flex-1 text-[#52586a] leading-relaxed">
-                {step.agent}{" → "}
+                {step.agent}
+                {" → "}
                 <em className="not-italic text-[#dde2ec]">{step.result}</em>
               </span>
-              <span className="text-[9px] whitespace-nowrap" style={{ color: "rgba(255,255,255,0.15)" }}>
+              <span
+                className="text-[9px] whitespace-nowrap"
+                style={{ color: "rgba(255,255,255,0.15)" }}
+              >
                 {step.duration_ms}ms
               </span>
             </div>
