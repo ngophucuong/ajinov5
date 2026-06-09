@@ -67,11 +67,12 @@ def _mock_embedding(text: str) -> list[float]:
     return vec
 
 
-async def get_embedding(text: str) -> list[float]:
+async def get_embedding(text: str) -> list[float] | None:
     """
     Get embedding vector for text.
-    Tries CF Workers AI first, falls back to mock.
-    Returns 1024-dim float list.
+    Tries CF Workers AI first. Falls back to mock ONLY if
+    ALLOW_MOCK_EMBEDDING=true (dev environments).
+    Returns None when no embedding available — caller handles gracefully.
     """
     if CF_WORKERS_AI_TOKEN and CF_ACCOUNT_ID:
         try:
@@ -92,16 +93,19 @@ async def get_embedding(text: str) -> list[float]:
                             f"[memory_agent] CF Workers AI embedding: {len(embedding)}d"
                         )
                         return embedding
-                print(
-                    f"[memory_agent] CF Workers AI failed: {resp.status_code} — using mock"
-                )
+                print(f"[memory_agent] CF Workers AI failed: {resp.status_code}")
         except Exception as e:
-            print(f"[memory_agent] CF Workers AI error: {e} — using mock")
+            print(f"[memory_agent] CF Workers AI error: {e}")
+
+    # Dev-only mock fallback (P0: never mock in production silently)
+    if os.getenv("ALLOW_MOCK_EMBEDDING", "") == "true":
+        print("[memory_agent] ⚠️ DEV MODE: Using MOCK embedding (hash-based 1024d).")
+        return _mock_embedding(text)
 
     print(
-        "[memory_agent] ⚠️ Using MOCK embedding (hash-based 1024d). Set CF_WORKERS_AI_TOKEN for real bge-m3."
+        "[memory_agent] ❌ No embedding available — CF_WORKERS_AI_TOKEN not configured."
     )
-    return _mock_embedding(text)
+    return None
 
 
 # ─── Vectorize (Primary) ─────────────────────────────────
@@ -288,6 +292,9 @@ async def retrieve_memories(
 
     # Get query embedding
     embedding = await get_embedding(query)
+    if embedding is None:
+        print("[memory_agent] No embedding available — skipping retrieval")
+        return []
 
     # Try Vectorize first (PRIMARY)
     results = await _vectorize_search(embedding, top_k)
@@ -332,21 +339,34 @@ async def store_memory(
 
     try:
         embedding = await get_embedding(content)
-        vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
+        vec_str = "[" + ",".join(str(v) for v in embedding) + "]" if embedding else None
 
         async with db_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO memory (content, embedding, status, source, source_ref, metadata)
-                VALUES ($1, $2::vector, 'pending', $3, $4::uuid, $5::jsonb)
-                RETURNING id
-                """,
-                content,
-                vec_str,
-                source,
-                source_ref,
-                metadata,
-            )
+            if vec_str:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO memory (content, embedding, status, source, source_ref, metadata)
+                    VALUES ($1, $2::vector, 'pending', $3, $4::uuid, $5::jsonb)
+                    RETURNING id
+                    """,
+                    content,
+                    vec_str,
+                    source,
+                    source_ref,
+                    metadata,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO memory (content, status, source, source_ref, metadata)
+                    VALUES ($1, 'pending', $2, $3::uuid, $4::jsonb)
+                    RETURNING id
+                    """,
+                    content,
+                    source,
+                    source_ref,
+                    metadata,
+                )
             memory_id = str(row["id"])
             print(f"[memory_agent] Stored memory {memory_id}: {content[:60]}...")
             return memory_id
