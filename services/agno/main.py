@@ -2129,7 +2129,12 @@ async def commit_capture(capture_id: str, request: dict):
     memory_ids = []
 
     for fact in facts:
-        mid = await store_memory(content=fact["fact"], source="capture", db_pool=pool)
+        mid = await store_memory(
+            content=fact["fact"],
+            source="capture",
+            source_ref=capture_id,
+            db_pool=pool,
+        )
         if mid:
             memory_ids.append(mid)
 
