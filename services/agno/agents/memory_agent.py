@@ -173,7 +173,7 @@ async def _pgvector_search(
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, content,
+                SELECT id, content, confidence_score, created_at,
                        1 - (embedding <=> $1::vector) AS similarity
                 FROM memory
                 WHERE status = 'canonical'
@@ -191,6 +191,8 @@ async def _pgvector_search(
                         "id": str(row["id"]),
                         "content": row["content"],
                         "score": float(row["similarity"]),
+                        "confidence_score": float(row["confidence_score"]),
+                        "created_at": row["created_at"],
                     }
                 )
             print(f"[memory_agent] pgvector search: {len(results)} canonical memories")

@@ -37,11 +37,11 @@ async def synthesize(
             confidence_scores = [r.get("confidence_score", 0.7) for r in memory_results]
             avg_freshness = sum(freshness_scores) / len(freshness_scores)
             avg_confidence = sum(confidence_scores) / len(confidence_scores)
-            if avg_freshness < 0.5:
+            if avg_freshness <= 0.5:
                 confidence_warning += (
                     "⚠️ Một số thông tin tôi dùng có thể đã cũ (> 6 tháng). "
                 )
-            if avg_confidence < 0.6:
+            if avg_confidence <= 0.6:
                 confidence_warning += "⚠️ Tôi không chắc hoàn toàn — nên kiểm tra lại."
 
     context = ""
@@ -90,11 +90,8 @@ async def synthesize(
             }
         )
 
-    # v6: inject confidence warning before reference data
-    if confidence_warning:
-        messages.append(
-            {"role": "system", "content": f"Lưu ý về độ tin cậy: {confidence_warning}"}
-        )
+    # v6: confidence warning is prepended directly to response (not via LLM)
+    # See line ~150 for the prepend logic
 
     if context:
         messages.append({"role": "system", "content": f"Dữ liệu tham khảo:\n{context}"})
@@ -142,6 +139,10 @@ async def synthesize(
 
             content = data["choices"][0]["message"]["content"]
             tokens = data.get("usage", {}).get("total_tokens", 0)
+
+            # v6: prepend deterministic confidence warning (PM: not via LLM)
+            if confidence_warning:
+                content = f"{confidence_warning}\n\n{content}"
 
             memory_candidates = []
             for sentence in content.split("."):
