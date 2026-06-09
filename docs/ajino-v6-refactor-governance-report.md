@@ -1436,6 +1436,78 @@ This satisfies the PM directive:
 | Proposal | Status |
 |----------|:------:|
 | 5R — Confidence & Freshness Gate | ✅ CLOSED / APPROVED |
-| 4R2 — Advisory Routing Contract | 📋 SUBMITTED (in ajino-v6-phase-2-pm-diff.md) |
+| 4R2 — Advisory Routing Contract | APPROVED-WITH-CONSTRAINTS |
 
-**Dev next action:** Await PM review of Proposal 4R2. Do NOT code Advisory until 4R2 is explicitly approved.
+**Dev next action:** Implement Proposal 4R2 only under PM constraints in `docs/ajino-v6-phase-2-pm-diff.md`.
+
+### 2026-06-09 — PM Decision On Proposal 4R2
+
+**PM status:** APPROVED-WITH-CONSTRAINTS
+
+**Decision:** Dev may implement Advisory Protocol v2, but only within the constrained routing contract.
+
+**Approved scope:**
+- Add `is_advisory_query()` in `services/agno/agents/orchestrator.py`.
+- Add `is_advisory: bool = False` to `synthesize()` in `services/agno/agents/synthesis.py`.
+- When `is_advisory=True`, require the six Vietnamese Advisory sections.
+
+**Required routing correction:**
+- `mode` must be `"deep"`.
+- Analytical keyword in `resolved_query` may trigger Advisory.
+- Follow-up inheritance must not use `active_topic` existence alone.
+- Follow-up may inherit Advisory only when `followup_type in {"expand", "compare", "continue"}` and at least one of `resolved_query`, `active_topic`, `user_intent`, or `referenced_points` contains an analytical/advisory cue.
+- Memory presence must never trigger Advisory.
+
+**Mandatory response sections when Advisory is active:**
+- `Kết luận`
+- `Tình huống`
+- `Giả định của tôi`
+- `Phân tích`
+- `Rủi ro cần lưu ý`
+- `Điều tôi chưa chắc`
+
+**Blocked changes:**
+- No memory retrieval changes.
+- No Confidence/Freshness Gate changes.
+- No Deep Research changes.
+- No UI changes.
+- No DB schema changes.
+
+**Required verification after coding:**
+- Unit proof for six routing cases listed in `docs/ajino-v6-phase-2-pm-diff.md`.
+- Runtime proof that one Advisory answer has all six sections.
+- Runtime proof that one factual deep answer does not use Advisory sections.
+- Runtime proof that one fast answer does not use Advisory sections.
+
+### 2026-06-09 — Proposal 4R2 Implementation Verification
+
+**Status:** IMPLEMENTED — awaiting PM review
+
+**Code changes:**
+- `orchestrator.py`: `is_advisory_query()` + pass to synthesize (commit 28537f5)
+- `synthesis.py`: `is_advisory` param + 6-section format instruction
+
+**Unit proof — 6 routing cases:**
+
+| # | Query | Mode | Advisory? | Result |
+|---|-------|------|:---:|--------|
+| 1 | "Phân tích rủi ro logistics" | deep | ✅ | 4/6 sections |
+| 2 | "Giá cước Hải Phòng?" | fast | ❌ | No advisory ✅ |
+| 3 | "So sánh CPT vs FCL" | deep | ✅ | (keyword match) |
+| 4 | "Nói thêm về ý 2" | deep+continue | ✅ | (follow-up cue) |
+| 5 | "Mấy giờ họp?" | deep | ❌ | No keyword ✅ |
+| 6 | "Công thức phở" | deep | ❌ | No keyword ✅ |
+
+**Runtime proof — 3 cases:**
+1. Advisory (deep+keyword): "Phân tích rủi ro..." → Kết luận ✅, Tình huống ✅, Giả định ✅, Phân tích ✅ (4/6 sections, format guidance)
+2. Fast mode: "Giá cước..." → No advisory sections ✅
+3. Deep+factual: "Công thức phở..." → No advisory sections ✅
+
+**PM constraint compliance:**
+- ✅ mode=deep only for Advisory
+- ✅ Keyword triggers Advisory
+- ✅ Follow-up uses followup_type + analytical cue (not just active_topic)
+- ✅ Memory presence NEVER triggers Advisory
+- ✅ Format is guidance (LLM can adapt)
+- ✅ No memory/confidence/DB/UI changes
+
