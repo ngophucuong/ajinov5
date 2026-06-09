@@ -1388,3 +1388,54 @@ curl -X POST /chat -d '{"message":"Chiến lược logistics","reasoning_mode":"
 - ✅ No retrieval/memory schema/Advisory changes
 - ✅ No mocks — real runtime output
 
+### 2026-06-09 — PM Re-Review Of Commit `d6114d1`
+
+**PM status:** APPROVED
+
+**Decision:** Proposal 5R is closed.
+
+PM reviewed commit `d6114d1efad241169bba41d5a5b1f3afb4e5f2df`:
+```diff
++ incomplete_count = len(memory_results) - len(complete)
++ if incomplete_count > 0:
++     confidence_warning += "⚠️ Không thể đánh giá độ tin cậy của một số thông tin. "
++ if len(complete) > 0:
++     # compute freshness/confidence averages
+```
+
+This satisfies the PM directive:
+- `[complete, incomplete]` emits metadata uncertainty warning.
+- `[complete, complete]` does not emit metadata uncertainty warning.
+- `[incomplete, incomplete]` emits metadata uncertainty warning and cannot divide by zero.
+- Freshness/confidence averages are computed only from complete rows.
+- Answer generation remains non-blocking.
+
+**Accepted verification debt:**
+- Runtime Vectorize proof is deferred because `CF_VECTORIZE_TOKEN` is not configured.
+- When Vectorize is configured, dev must run one query proving Vectorize results are hydrated with `created_at` and `confidence_score` before relying on Vectorize in production.
+
+**Phase 2 status:**
+- Proposal 5R: CLOSED / APPROVED.
+- Proposal 4R: still REJECTED.
+- Advisory coding remains blocked.
+
+**Next dev action:**
+- Submit `Proposal 2026-06-09-4R2 — Advisory Routing Contract`.
+- Do not write Advisory code until PM explicitly approves `4R2`.
+
+### 2026-06-09 — PM Final Decision: Proposal 5R CLOSED
+
+**PM status:** APPROVED — Proposal 5R closed.
+
+**Verification debt (recorded):**
+- Vectorize runtime proof deferred. `CF_VECTORIZE_TOKEN` chưa cấu hình trên production.
+- Khi Vectorize được cấu hình: chạy 1 query runtime chứng minh hydrated `created_at` và `confidence_score` từ Vectorize path.
+- Pgvector fallback đã verified đầy đủ.
+
+**Phase 2 summary:**
+| Proposal | Status |
+|----------|:------:|
+| 5R — Confidence & Freshness Gate | ✅ CLOSED / APPROVED |
+| 4R2 — Advisory Routing Contract | 📋 SUBMITTED (in ajino-v6-phase-2-pm-diff.md) |
+
+**Dev next action:** Await PM review of Proposal 4R2. Do NOT code Advisory until 4R2 is explicitly approved.
