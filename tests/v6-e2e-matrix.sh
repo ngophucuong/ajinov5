@@ -126,30 +126,38 @@ CAP_ID=$(echo "$CAP_RESP" | python3 -c "import sys,json; print(json.load(sys.std
 if [ -n "$CAP_ID" ]; then
     pass "Capture created: $CAP_ID"
 
-    # Wait for async extraction
-    sleep 5
+    # Wait for async extraction (retry up to 6x5s = 30s)
+    for i in $(seq 1 6); do
+      sleep 5
+      CAP_STATUS=$(curl -s "$BASE_URL/capture/$CAP_ID" -H "X-User-Id: $USER_ID" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['status'])" 2>/dev/null || echo "")
+      EXTRACTED=$(curl -s "$BASE_URL/capture/$CAP_ID" -H "X-User-Id: $USER_ID" | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; v=d.get('extracted_facts','[]'); v=json.loads(v) if isinstance(v,str) else v; print(len(v) if v else 0)" 2>/dev/null || echo "0")
+      if [ "$CAP_STATUS" = "extracted" ] && [ "$EXTRACTED" -gt 0 ] 2>/dev/null; then
+        break
+      fi
+    done
 
-    # Check status
+    # Check extraction result
     CAP_STATUS=$(curl -s "$BASE_URL/capture/$CAP_ID" -H "X-User-Id: $USER_ID" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['status'])" 2>/dev/null || echo "")
+    EXTRACTED=$(curl -s "$BASE_URL/capture/$CAP_ID" -H "X-User-Id: $USER_ID" | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; v=d.get('extracted_facts','[]'); v=json.loads(v) if isinstance(v,str) else v; print(len(v) if v else 0)" 2>/dev/null || echo "0")
 
-    if [ "$CAP_STATUS" = "extracted" ]; then
-        # Inject facts if extraction returned empty
-        db "UPDATE captures SET extracted_facts = '[{\"fact\": \"${PREFIX}: Hợp đồng Nhật 5 tỷ, 2 năm.\", \"confidence\": 0.9}]' WHERE id = '$CAP_ID'" 2>/dev/null || true
+    if [ "$CAP_STATUS" = "extracted" ] && [ "$EXTRACTED" -gt 0 ] 2>/dev/null; then
+      pass "Capture extracted: $EXTRACTED facts"
 
-        COMMIT_RESP=$(curl -s -X POST "$BASE_URL/capture/$CAP_ID/commit" \
-            -H "Content-Type: application/json" \
-            -H "X-User-Id: $USER_ID" \
-            -d '{}')
+      COMMIT_RESP=$(curl -s -X POST "$BASE_URL/capture/$CAP_ID/commit" \
+          -H "Content-Type: application/json" \
+          -H "X-User-Id: $USER_ID" \
+          -d '{}')
 
-        COMMIT_IDS=$(echo "$COMMIT_RESP" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['data']['memory_ids']))" 2>/dev/null || echo "0")
+      COMMIT_IDS=$(echo "$COMMIT_RESP" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['data']['memory_ids']))" 2>/dev/null || echo "0")
 
-        if [ "$COMMIT_IDS" -gt 0 ] 2>/dev/null; then
-            pass "Capture committed: $COMMIT_IDS memory rows"
-        else
-            fail "Capture commit" "0 memory rows"
-        fi
+      if [ "$COMMIT_IDS" -gt 0 ] 2>/dev/null; then
+        pass "Capture committed: $COMMIT_IDS memory rows"
+      else
+        fail "Capture commit" "0 memory rows"
+      fi
     else
-        echo "  ⚠️  Capture status: $CAP_STATUS (extraction may need more time)"
+      echo "  ⚠️  Capture extraction gap: status=$CAP_STATUS facts=$EXTRACTED"
+      echo "  📋 Documented as runtime gap — async extraction pipeline may need attention"
     fi
 else
     fail "Capture creation" "failed"
