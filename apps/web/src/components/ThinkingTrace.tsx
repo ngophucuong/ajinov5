@@ -38,12 +38,12 @@ export default function ThinkingTrace({
 }: Props) {
   const [open, setOpen] = useState(true);
 
-  const totalMs = Array.isArray(steps)
-    ? steps.reduce((sum, s) => sum + (s.duration_ms || 0), 0)
-    : 0;
+  const safeSteps = Array.isArray(steps) ? steps : [];
+  const totalMs = safeSteps.reduce((sum, s) => sum + (s.duration_ms || 0), 0);
   const totalSec = elapsedMs
     ? (elapsedMs / 1000).toFixed(1)
     : (totalMs / 1000).toFixed(1);
+  const stepCount = safeSteps.length;
 
   return (
     <div
@@ -65,10 +65,10 @@ export default function ThinkingTrace({
         </span>
         <span className="flex-1 text-[10px] font-mono text-[#52586a] tracking-wider">
           {isStreaming
-            ? steps.length > 0
-              ? `Suy nghĩ · ${steps.length} bước · ${totalSec}s`
+            ? stepCount > 0
+              ? `Suy nghĩ · ${stepCount} bước · ${totalSec}s`
               : "Đang phân tích..."
-            : `Đã suy nghĩ · ${steps.length} bước · ${totalSec}s`}
+            : `Đã suy nghĩ · ${stepCount} bước · ${totalSec}s`}
         </span>
         <ModeBadge mode={reasoningMode} />
         {isStreaming ? (
@@ -88,12 +88,12 @@ export default function ThinkingTrace({
       </div>
 
       {/* Body */}
-      {open && steps.length > 0 && (
+      {open && stepCount > 0 && (
         <div
           className="px-[13px] py-[10px] flex flex-col gap-[7px]"
           style={{ borderTop: "0.5px solid rgba(255,255,255,0.05)" }}
         >
-          {steps.map((step, i) => (
+          {safeSteps.map((step, i) => (
             <div
               key={i}
               className="flex items-start gap-2 text-[11px] font-mono"

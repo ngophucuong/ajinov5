@@ -546,7 +546,12 @@ app.all("/api/studio/*", (c: Context<{ Bindings: Bindings }>) => {
   );
 });
 
-// Console API proxy
+// Console API proxy — skills maps to Agno GET /skills
+app.get("/api/console/skills", (c: Context<{ Bindings: Bindings }>) => {
+  return proxyToVPS(c.req.raw, "/skills", getJwtHeaders(c));
+});
+
+// Console API proxy (generic)
 app.all("/api/console/*", (c: Context<{ Bindings: Bindings }>) => {
   return proxyToVPS(
     c.req.raw,
@@ -705,7 +710,7 @@ app.notFound(async (c: Context<{ Bindings: Bindings }>) => {
   <title>Ajino v5</title>
   <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600&family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script type="module" crossorigin src="/assets/index-B6-Fr5hq.js"></script>
+  <script type="module" crossorigin src="/assets/index-YlSZoOWu.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-hIcxPGs5.css">
 </head>
 <body>
