@@ -151,6 +151,34 @@ Purpose: this file is the compact PM/dev diff for Phase 2 decisions. Dev should 
 - Dev next action: fix only partial metadata warning logic.
 - Advisory/4R2 remains blocked for coding.
 
+## PM Implementation Directive Diff
+
+```diff
+@@ Proposal 5R partial metadata fix
++ PM status: ACTION-REQUIRED
++ Target file: `services/agno/agents/synthesis.py`
++
++ Required logic:
++ - Build `complete` from rows where `metadata_complete=true`.
++ - Compute `incomplete_count = len(memory_results) - len(complete)`.
++ - If `incomplete_count > 0`, prepend metadata uncertainty warning.
++ - If `complete` is not empty, compute freshness/confidence averages from
++   complete rows only.
++ - If `complete` is empty, do not compute averages.
++
++ Required proof:
++ - `[complete, incomplete]` => metadata warning.
++ - `[complete, complete]` => no metadata warning.
++ - `[incomplete, incomplete]` => metadata warning and no divide-by-zero.
++ - One normal runtime chat output proves answer generation still works.
++
++ Not allowed:
++ - No retrieval ranking change.
++ - No memory schema change.
++ - No Advisory routing.
++ - No mock runtime proof.
+```
+
 ## Dev Fix Applied — 2026-06-09
 
 ```diff
@@ -219,3 +247,95 @@ Purpose: this file is the compact PM/dev diff for Phase 2 decisions. Dev should 
 **Runtime:** All complete → no false warning ✅
 
 **Current:** Proposal 5R — `FIXED, AWAITING PM REVIEW`
+
+## Proposal 2026-06-09-4R2 — Advisory Protocol v2 (prepared while awaiting 5R review)
+
+**Status:** PROPOSED
+**Phase:** 2
+
+### is_advisory_query() Contract (exact, from current code)
+
+```python
+# File: services/agno/agents/orchestrator.py (new function)
+def is_advisory_query(
+    resolved_query: str,
+    mode: str,                      # "fast" | "deep" | "auto"
+    dialogue_state: dict | None = None,
+) -> bool:
+    """
+    Determine if response should use Advisory output format.
+    
+    Rules (in priority order):
+    1. mode MUST be "deep" (user chose or auto-detected analytical)
+    2. resolved_query MUST contain analytical keyword
+    3. OR: dialogue_state shows continuing an advisory discussion
+    
+    Memory presence does NOT trigger advisory format.
+    """
+    # Rule 1: only deep mode
+    if mode != "deep":
+        return False
+    
+    # Rule 2: analytical keywords
+    if any(kw in resolved_query.lower() for kw in ANALYTICAL_KEYWORDS):
+        return True
+    
+    # Rule 3: continuing advisory discussion
+    if dialogue_state:
+        if dialogue_state.get("active_topic") and dialogue_state.get("followup_type") != "new_topic":
+            return True
+    
+    return False
+```
+
+### Routing examples
+
+| Query | Mode | State | Advisory? | Reason |
+|-------|------|-------|:---:|--------|
+| "Phân tích rủi ro logistics" | deep | new | ✅ | Keyword + deep |
+| "Giá cước Hải Phòng?" | fast | new | ❌ | Not deep |
+| "So sánh CPT vs FCL" | deep | new | ✅ | Keyword + deep |
+| "Nói thêm về ý 2" | deep | continue | ✅ | Inherits advisory |
+| "Mấy giờ họp?" | deep | new | ❌ | No keyword, new topic |
+| "Công thức phở" | deep | new | ❌ | No keyword |
+
+### Code changes (2 files)
+
+**File 1:** `orchestrator.py` — add `is_advisory_query()`, pass to synthesize:
+```python
+is_advisory = is_advisory_query(resolved_query, mode, dialogue_state)
+response = await synthesize(..., is_advisory=is_advisory)
+```
+
+**File 2:** `synthesis.py` — add `is_advisory: bool = False` param. When True, append Advisory format instructions to system prompt (NOT replace — still allows LLM to adapt).
+
+### Response contract (Vietnamese labels)
+
+Only when `is_advisory=True`. Appended as system instruction:
+```
+**Kết luận:** [1-2 câu]
+**Tình huống:** [tóm tắt]
+**Giả định của tôi:**
+- ...
+**Phân tích:** [multi-angle]
+**Rủi ro cần lưu ý:**
+- ...
+**Điều tôi chưa chắc:**
+- ...
+```
+
+### What this does NOT do
+- ❌ Memory presence does not trigger advisory
+- ❌ Does not force all deep queries into format
+- ❌ Does not affect fast mode, factual Q&A, agenda
+- ❌ Does not modify Deep Research
+
+### Risk
+- False negative: advisory query without keyword → no format (acceptable — LLM still answers well)
+- False positive: query with keyword but factual → LLM adapts (format is guidance, not constraint)
+
+### Rollback
+Remove `is_advisory` param, revert prompt.
+
+### PM Decision
+PENDING
