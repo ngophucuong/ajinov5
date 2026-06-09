@@ -107,20 +107,21 @@ async def synthesize(
     # v6: confidence warning is prepended directly to response (not via LLM)
     # See line ~150 for the prepend logic
 
-    # v6 Advisory Protocol (Proposal 4R2) — system instruction only, not forced
+    # v6 Advisory Protocol (Proposal 4R2) — mandatory format
     if is_advisory:
         messages.append(
             {
                 "role": "system",
                 "content": (
-                    "Đây là câu hỏi cần phân tích chuyên sâu. "
-                    "Hãy trả lời theo định dạng sau (ưu tiên, không bắt buộc tuyệt đối):\n\n"
-                    "**Kết luận:** [1-2 câu tổng kết]\n\n"
-                    "**Tình huống:** [tóm tắt bối cảnh từ dữ liệu]\n\n"
-                    "**Giả định của tôi:**\n- [giả định 1]\n- [giả định 2]\n\n"
-                    "**Phân tích:** [phân tích đa chiều, dùng dữ liệu tham khảo]\n\n"
-                    "**Rủi ro cần lưu ý:**\n- [rủi ro 1]\n\n"
-                    "**Điều tôi chưa chắc:**\n- [điểm chưa rõ, cần xác minh thêm]"
+                    "Đây là câu hỏi cần phân tích chuyên sâu.\n"
+                    "BẮT BUỘC: Trả lời đúng 6 mục dưới đây, theo đúng thứ tự.\n"
+                    "Không được gộp mục, không được bỏ mục nào.\n\n"
+                    "1. **Kết luận:** [1-2 câu]\n\n"
+                    "2. **Tình huống:** [bối cảnh]\n\n"
+                    "3. **Giả định của tôi:**\n- ...\n\n"
+                    "4. **Phân tích:** [đa chiều]\n\n"
+                    "5. **Rủi ro cần lưu ý:**\n- ...\n\n"
+                    "6. **Điều tôi chưa chắc:**\n- ..."
                 ),
             }
         )
