@@ -853,3 +853,249 @@ d4dd41a0  | e35bb376-...                  | e35bb376-... ✅     | 21c32c1a-... 
 → Old rows: source_ref still points to old session IDs (not backfilled per PM) ✅
 
 **Phase 1 status: All approved proposals DONE + VERIFIED.**
+
+### 2026-06-09 — PM Phase 1 Closure And Phase 2 Direction
+
+**PM status:** PHASE-1-CLOSED
+
+**Decision:** Phase 1 is closed.
+
+Approved Phase 1 proposals are accepted as implemented and runtime-verified:
+- Proposal 1: structured memory migration
+- Proposal 2: Memory Review API
+- Proposal 3: read-time freshness scoring
+- Proposal 6: source normalization
+
+**Legacy data policy:**
+- Existing `chat` rows where `source_ref = chat_sessions.id` may remain legacy.
+- Existing rows with NULL `source_ref` may remain only when no deterministic backfill exists.
+- All new `chat` memory rows must keep `source_ref = chat_messages.id` and `metadata.session_id` when available.
+
+## Phase 2 Gate — Advisory And Confidence
+
+**PM status:** NOT-APPROVED-FOR-CODING
+
+**Decision:** Do not implement Proposal 4 or Proposal 5 yet.
+
+Both proposals were previously rejected because they were too high-level. Dev must resubmit concrete Phase 2 proposals in this same file before writing code.
+
+### Required Resubmission For Proposal 4 — Advisory Protocol
+
+Submit a new section named:
+`Proposal 2026-06-09-4R — Advisory Protocol Contract`
+
+The proposal must include:
+- Exact routing rule: when a response uses advisory format and when it must not.
+- Exact current-code entrypoint: function names and files from the existing repo.
+- Exact response contract: section names, order, optional/required sections, and Vietnamese labels.
+- Exact fallback behavior for normal chat, factual Q&A, follow-up questions, and Deep Research outputs.
+- Test cases: at least 3 advisory prompts and 3 non-advisory prompts.
+
+**Hard constraints:**
+- Do not implement a vague `intent advisory` unless the contract exists in current code.
+- Do not use only keyword matching if conversation context is required.
+- Do not force every answer into advisory format.
+- Do not modify Deep Research scope.
+
+### Required Resubmission For Proposal 5 — Confidence Gate
+
+Submit a new section named:
+`Proposal 2026-06-09-5R — Confidence And Freshness Contract`
+
+The proposal must include:
+- Exact data path from retrieval result to synthesis prompt.
+- Exact fields passed into synthesis: `confidence`, `freshness_score`, `source`, `source_ref`, `updated_at` or equivalent.
+- Exact thresholds and user-facing behavior for low confidence, stale facts, no facts, and conflicting facts.
+- Exact response contract: where warnings appear and how they are phrased in Vietnamese.
+- Test cases with SQL/API proof that metadata reaches synthesis.
+
+**Hard constraints:**
+- Do not add warning text by guessing inside the final prompt only.
+- Do not compute confidence/freshness if the values are not actually present in the synthesis input.
+- Do not block answer generation solely because retrieved memory is old; warn and explain uncertainty instead.
+- Do not add new DB columns unless separately proposed and approved.
+
+**Next dev action:** Submit Proposal `4R` and `5R` only. No Phase 2 coding until PM sets each proposal to `APPROVED`.
+
+---
+
+## Proposal 2026-06-09-4R — Advisory Protocol Contract
+**Owner:** Dev (AI agent)
+**Status:** PROPOSED
+**Phase:** 2
+**Scope:** Advisory response format in synthesis prompt — routing + contract
+
+### Problem
+Chat response cho câu hỏi phân tích/chiến lược không có format chuẩn. PM yêu cầu output contract: Kết luận → Tình huống → Giả định → Phân tích → Rủi ro → Không chắc.
+
+### Routing Rule (exact, from current code)
+
+Entry point: `orchestrator.py:156` — `determine_mode(resolved_query, mode)`. Currently returns `(mode, model)`.
+
+**Proposed routing:** Advisory format triggers when `mode == "deep"` AND `resolved_query` meets ONE of:
+- Contains analytical keyword (from `ANALYTICAL_KEYWORDS` in `orchestrator.py:19-31`)
+- `dialogue_state.followup_type != "new_topic"` AND `dialogue_state.user_intent == "continue previous discussion"`
+- Memory was injected (`len(memory_results) > 0`) AND query asks for analysis/đánh giá/chiến lược
+
+**Fallback:** `mode == "fast"`, direct Q&A, follow-up clarification, factual lookup → standard format (no advisory sections).
+
+### Exact Code Changes
+
+**File 1:** `services/agno/agents/orchestrator.py`
+- After line 246 (memory retrieval complete), add `is_advisory` flag to synthesis call:
+```python
+is_advisory = (mode == "deep") and (
+    any(kw in resolved_query.lower() for kw in ANALYTICAL_KEYWORDS) or
+    len(memory_results) > 0
+)
+```
+
+**File 2:** `services/agno/agents/synthesis.py`
+- Add `is_advisory: bool = False` parameter to `synthesize()`
+- When `is_advisory=True`, prepend Advisory Protocol to system prompt
+
+### Response Contract (exact, Vietnamese labels)
+
+Only applied when `is_advisory=True`. Format appended after memory context:
+
+```
+**Kết luận:** [1-2 câu tổng kết]
+
+**Tình huống:**
+[Dựa trên: ... tóm tắt tình huống từ dữ liệu]
+
+**Giả định của tôi:**
+- [Giả định 1]
+- [Giả định 2]
+
+**Phân tích:**
+[Multi-angle analysis, dùng dữ liệu tìm kiếm + bộ nhớ]
+
+**Rủi ro cần lưu ý:**
+- [Rủi ro 1]
+
+**Điều tôi chưa chắc:**
+- [Điểm chưa rõ, cần xác minh thêm]
+```
+
+### Test Cases
+
+**Advisory prompts (should trigger format):**
+1. "Phân tích rủi ro khi mở rộng thị trường Campuchia"
+2. "Đánh giá chiến lược logistics Q4 — nên ưu tiên đường biển hay đường bộ?"
+3. "So sánh cơ hội đầu tư vào logistics Việt Nam vs Thái Lan"
+
+**Non-advisory prompts (must NOT trigger format):**
+1. "Giá cước vận chuyển Hải Phòng tháng 6 là bao nhiêu?" (factual)
+2. "Nói thêm về ý thứ 2" (follow-up)
+3. "Mấy giờ có cuộc họp?" (agenda/schedule)
+
+### Risk
+- Prompt dài hơn → token cost +15% cho deep queries
+- False positive: factual query misclassified as advisory → format gây khó chịu
+- Mitigation: keyword check đơn giản, có thể manual override (reasoning_mode=fast skip)
+
+### Rollback
+Remove `is_advisory` parameter, revert system prompt.
+
+### PM Decision
+PENDING
+
+---
+
+## Proposal 2026-06-09-5R — Confidence And Freshness Contract
+**Owner:** Dev (AI agent)
+**Status:** PROPOSED
+**Phase:** 2
+**Scope:** Confidence/freshness gate in synthesis — data path + thresholds + response contract
+
+### Exact Data Path
+
+```
+orchestrator.run_pipeline()
+  → Stage 3: memory_agent.retrieve_memories()
+    → returns [{id, content, score, freshness_score, stale, confidence_score}]
+  → memory_results (enriched with v6 fields)
+  → memory_context string (line 212-216 in orchestrator.py)
+  → Stage 4: synthesize(memory_context=memory_context, ...)
+```
+
+**Current gap:** `synthesize()` receives `memory_context` as a formatted string, NOT as structured data. Cannot compute averages from a string.
+
+**Required change:** Pass `memory_results` list to `synthesize()` as structured data:
+```python
+response = await synthesize(
+    ...
+    memory_context=memory_context,
+    memory_results=memory_results,  # NEW: structured list with freshness/confidence
+)
+```
+
+### Exact Fields (from memory_agent.py:228-235)
+
+Each `memory_results` item already has:
+```python
+{
+  "id": str,
+  "content": str,
+  "score": float,          # vector similarity
+  "freshness_score": float, # from compute_freshness()
+  "stale": bool,           # freshness_score < 0.5
+  "confidence_score": float # from DB column, default 0.7
+}
+```
+
+### Exact Thresholds & Behavior
+
+| Condition | Trigger | Action |
+|-----------|---------|--------|
+| `len(memory_results) == 0` | No memory found | Prefix: "Tôi không tìm thấy thông tin liên quan trong bộ nhớ." |
+| `avg(freshness_score) < 0.5` | Stale facts | Prefix: "⚠️ Một số thông tin tôi dùng có thể đã cũ (> 6 tháng)." |
+| `avg(confidence_score) < 0.6` | Low confidence | Suffix: "⚠️ Tôi không chắc hoàn toàn — nên kiểm tra lại." |
+| Both stale + low confidence | Both | Both prefix + suffix |
+| All fresh + high confidence | OK | No warning |
+
+**Stale facts NOT excluded** — they still appear in memory_context, just tagged.
+
+### Exact Code Changes
+
+**File 1:** `services/agno/agents/orchestrator.py` (line 270-282)
+- Add `memory_results=memory_results` to `synthesize()` call
+
+**File 2:** `services/agno/agents/synthesis.py` (line 14-26)
+- Add `memory_results: list[dict] = None` parameter
+- Before building messages, compute gate:
+```python
+if memory_results:
+    freshness_scores = [r.get("freshness_score", 1.0) for r in memory_results]
+    confidence_scores = [r.get("confidence_score", 0.7) for r in memory_results]
+    avg_freshness = sum(freshness_scores) / len(freshness_scores)
+    avg_confidence = sum(confidence_scores) / len(confidence_scores)
+else:
+    avg_freshness = 1.0
+    avg_confidence = 0.0
+```
+- Inject warning into response:
+```python
+if len(memory_results or []) == 0:
+    warning = "Tôi không tìm thấy thông tin liên quan trong bộ nhớ."
+elif avg_freshness < 0.5:
+    warning = "⚠️ Một số thông tin tôi dùng có thể đã cũ (> 6 tháng)."
+# Add warning as system message before user message
+```
+
+### Test Cases
+
+1. **No facts:** Query "Ai là tổng thống Pluto?" → 0 memory_results → "không tìm thấy thông tin"
+2. **Stale facts (manual mock):** Set freshness_score=0.2 on injected facts → response has "đã cũ" prefix
+3. **Fresh + high confidence:** All freshness=1.0, confidence=0.9 → no warning
+
+### Risk
+- Threshold tuning: 0.5/0.6 may need adjustment after real-world testing
+- No new DB columns needed — all fields already exist from Phase 1 migration
+
+### Rollback
+Remove `memory_results` parameter and gate logic from synthesis.py.
+
+### PM Decision
+PENDING
