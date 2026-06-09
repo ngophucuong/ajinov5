@@ -523,7 +523,12 @@ export default function Chat() {
       };
 
       if (activeSessionId) {
-        await streamChatMessage(activeSessionId, content, mode, streamCallbacks);
+        await streamChatMessage(
+          activeSessionId,
+          content,
+          mode,
+          streamCallbacks,
+        );
       } else {
         const sessionId = await createSessionAndStream(
           content,
@@ -543,6 +548,8 @@ export default function Chat() {
                 ...prev,
               ],
         );
+        // Stream the message with the new session
+        await streamChatMessage(sessionId, content, mode, streamCallbacks);
       }
     } catch (err) {
       failClosed(

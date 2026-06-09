@@ -32,7 +32,6 @@ ANALYTICAL_KEYWORDS = {
     "risk",
 }
 
-
 def query_complexity(text: str) -> Literal["fast", "deep"]:
     """Heuristic routing — NO ML, NO LLM call. Must run in microseconds."""
     word_count = len(text.split())
@@ -63,26 +62,97 @@ async def run_pipeline(
     serper_key: str = "",
     db_pool=None,
     telegram_id: str = None,
+    session_id: str = None,
 ) -> dict:
     """
     Full chat pipeline:
-    1. Decompose (if deep mode)
-    2. Agentic Loop (web search + memory retrieval)
-    3. Memory Retrieval (canonical memories)
-    4. Synthesis (with memory context)
+    0. Context assembly: fetch history → resolve_followup (if multi-turn) → resolved_query
+    1. Determine mode from resolved_query
+    2. Decompose (if deep mode) using resolved_query
+    3. Web search + memory retrieval using resolved_query
+    4. Synthesis with conversation_history as context
     Returns: {response, thinking_trace, model_used, tokens_used, memory_candidates}
     """
     thinking_trace = []
     start_time = time.time()
 
-    mode, model = determine_mode(message, mode)
+    # Stage 0: Context assembly — fetch latest history, resolve follow-up, build dialogue state
+    recent_messages = []
+    conversation_history = ""
+    dialogue_state = {
+        "active_topic": "",
+        "user_intent": "new question",
+        "resolved_query": message,
+        "followup_type": "new_topic",
+        "referenced_points": [],
+        "should_reset_context": True,
+    }
+    resolved_query = message
 
-    # Stage 1: Decompose (skip in fast mode)
+    if session_id and db_pool:
+        t_ctx = time.time()
+        try:
+            from .followup_resolver import resolve_followup
+
+            rows = await db_pool.fetch(
+                "SELECT role, content FROM chat_messages "
+                "WHERE session_id = $1 ORDER BY created_at DESC LIMIT 10",
+                session_id,
+            )
+            if rows:
+                recent_messages = [dict(r) for r in reversed(rows)]
+                history_parts = []
+                for r in recent_messages:
+                    prefix = "User" if r["role"] == "user" else "Assistant"
+                    history_parts.append(f"{prefix}: {r['content'][:500]}")
+                conversation_history = "\n".join(history_parts)
+
+                dialogue_state = await resolve_followup(
+                    latest_user_message=message,
+                    recent_messages=recent_messages,
+                    litellm_url=litellm_url,
+                    litellm_api_key=litellm_api_key,
+                )
+                resolved_query = (
+                    dialogue_state.get("resolved_query", "").strip() or message
+                )
+        except Exception as e:
+            print(f"[orchestrator] Session context error: {e}")
+        thinking_trace.append(
+            {
+                "step": "context_resolution",
+                "agent": "followup_resolver",
+                "status": "done",
+                "duration_ms": int((time.time() - t_ctx) * 1000),
+                "result": (
+                    f"{dialogue_state.get('followup_type', 'new_topic')} -> "
+                    f"{resolved_query[:120]}"
+                ),
+            }
+        )
+    else:
+        thinking_trace.append(
+            {
+                "step": "context_resolution",
+                "agent": "followup_resolver",
+                "status": "skipped",
+                "duration_ms": 0,
+                "result": "no session context",
+            }
+        )
+
+    if dialogue_state.get("should_reset_context"):
+        conversation_history = ""
+
+    # Stage 1: Determine mode from resolved_query
+    mode, model = determine_mode(resolved_query, mode)
+
+    # Stage 2: Decompose (skip in fast mode)
     if mode == "deep":
         t0 = time.time()
         from .reasoning import decompose
 
-        sub_questions = await decompose(message, litellm_url, litellm_api_key)
+        sub_questions = await decompose(resolved_query, litellm_url, litellm_api_key)
         thinking_trace.append(
             {
                 "step": "decompose",
@@ -93,9 +163,9 @@ async def run_pipeline(
             }
         )
     else:
-        sub_questions = [message]
+        sub_questions = [resolved_query]
 
-    # Stage 2: Agentic Loop (search + memory)
+    # Stage 3: Agentic Loop (search + memory) — use resolved_query
     t1 = time.time()
     search_results = []
     if serper_key and sub_questions:
@@ -125,7 +195,7 @@ async def run_pipeline(
             from .memory_agent import retrieve_memories
 
             memory_results = await retrieve_memories(
-                query=message,
+                query=resolved_query,
                 top_k=7,
                 db_pool=db_pool,
             )
@@ -190,6 +260,7 @@ async def run_pipeline(
 
     response = await synthesize(
         user_message=message,
+        resolved_query=resolved_query,
         sub_questions=sub_questions,
         search_results=search_results,
         memory_context=memory_context,
@@ -197,6 +268,8 @@ async def run_pipeline(
         litellm_url=litellm_url,
         litellm_api_key=litellm_api_key,
         telegram_context=telegram_context,
+        conversation_history=conversation_history,
+        dialogue_state=dialogue_state,
     )
 
     thinking_trace.append(

@@ -713,6 +713,7 @@ async def chat(request: dict):
         serper_key=SERPER_KEY,
         db_pool=pool,
         telegram_id=str(user_id) if surface == "telegram" and user_id else None,
+        session_id=session_id,
     )
 
     # Persist chat + auto-extract memory
@@ -763,6 +764,7 @@ async def chat_stream(request: dict):
                 serper_key=SERPER_KEY,
                 db_pool=pool,
                 telegram_id=str(user_id) if surface == "telegram" and user_id else None,
+                session_id=session_id,
             )
 
             # Send trace events

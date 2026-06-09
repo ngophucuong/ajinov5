@@ -13,6 +13,7 @@ Sử dụng dữ liệu tìm kiếm và bộ nhớ doanh nghiệp được cung 
 
 async def synthesize(
     user_message: str,
+    resolved_query: str,
     sub_questions: list[str],
     search_results: list[dict],
     model: str,
@@ -20,6 +21,8 @@ async def synthesize(
     litellm_api_key: str = "",
     memory_context: str = "",
     telegram_context: dict = None,
+    conversation_history: str = "",
+    dialogue_state: dict | None = None,
 ) -> dict:
     """Generate final response with context."""
     context = ""
@@ -44,6 +47,30 @@ async def synthesize(
     else:
         messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
+    # Inject conversation history as context
+    if conversation_history:
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Lịch sử hội thoại gần đây (chỉ để lấy ngữ cảnh, hãy trả lời cho tin nhắn mới nhất):\n{conversation_history}",
+            }
+        )
+
+    if dialogue_state:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Trạng thái hội thoại đã resolve:\n"
+                    f"- Chủ đề đang active: {dialogue_state.get('active_topic', '')}\n"
+                    f"- Ý định hiện tại của user: {dialogue_state.get('user_intent', '')}\n"
+                    f"- Loại follow-up: {dialogue_state.get('followup_type', '')}\n"
+                    f"- Các ý đang được tham chiếu: {', '.join(dialogue_state.get('referenced_points', [])) or 'không có'}\n"
+                    f"- Câu hỏi đã resolve đầy đủ: {resolved_query}"
+                ),
+            }
+        )
+
     if context:
         messages.append({"role": "system", "content": f"Dữ liệu tham khảo:\n{context}"})
 
@@ -52,11 +79,23 @@ async def synthesize(
         messages.append(
             {
                 "role": "user",
-                "content": f"Câu hỏi gốc: {user_message}\n\nCác khía cạnh cần phân tích:\n{questions_text}",
+                "content": (
+                    f"Tin nhắn mới nhất của người dùng: {user_message}\n"
+                    f"Câu hỏi đã resolve đầy đủ theo ngữ cảnh: {resolved_query}\n\n"
+                    f"Các khía cạnh cần phân tích:\n{questions_text}"
+                ),
             }
         )
     else:
-        messages.append({"role": "user", "content": user_message})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"Tin nhắn mới nhất của người dùng: {user_message}\n"
+                    f"Câu hỏi đã resolve đầy đủ theo ngữ cảnh: {resolved_query}"
+                ),
+            }
+        )
 
     headers = {"Content-Type": "application/json"}
     if litellm_api_key:

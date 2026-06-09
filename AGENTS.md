@@ -10,9 +10,10 @@
 Before the first keystroke of any session:
 - [ ] Read `PROJECT_CONTRACT.yaml` (stack, schemas, hard constraints)
 - [ ] Read `AGENT_RULES.md` commandments 1–14
+- [ ] Load `.env` vào biến môi trường: `set -a && source .env && set +a` (Docker Compose tự đọc; làm thêm để các lệnh terminal trực tiếp cũng có)
 - [ ] Run `docker compose ps` — verify all services are UP before coding
 - [ ] Identify which module you are touching (§4 below) and read its acceptance criteria
-- [ ] If touching frontend: open `design/ajino_v5_ui.html` in browser — it is truth
+- [ ] If touching frontend: open `docs/ajino_v5_ui.html` in browser — it is truth
 
 ---
 

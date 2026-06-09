@@ -5,6 +5,7 @@
 .env.*.local
 *.pem
 *.key
+.dev.vars
 credentials.json
 cloudflared/
 
