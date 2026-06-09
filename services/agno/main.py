@@ -586,7 +586,7 @@ async def _persist_chat_and_extract_memory(
     session_id: str | None,
     pool: asyncpg.Pool,
     surface: str = "web",
-):
+) -> dict:
     """
     Persist chat messages to DB and auto-extract memory candidates.
     Shared between /chat and /chat/stream.
@@ -626,53 +626,49 @@ async def _persist_chat_and_extract_memory(
             session_id = None
 
     if not session_id or not user_uuid:
-        print("[chat] Cannot persist — missing session_id or user_uuid")
-        return
+        raise RuntimeError("[chat] Cannot persist — missing session_id or user_uuid")
 
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.fetchrow(
+                "INSERT INTO chat_messages (session_id, role, content, reasoning_mode) "
+                "VALUES ($1, 'user', $2, $3) RETURNING id",
+                session_id,
+                message,
+                mode,
+            )
+            assistant_row = await conn.fetchrow(
+                "INSERT INTO chat_messages (session_id, role, content, thinking_trace, "
+                "model_used, reasoning_mode, tokens_used, latency_ms) "
+                "VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7) RETURNING id",
+                session_id,
+                result.get("response", ""),
+                json.dumps(result.get("thinking_trace", [])),
+                result.get("model_used"),
+                result.get("reasoning_mode"),
+                result.get("tokens_used"),
+                result.get("latency_ms"),
+            )
+            await conn.execute(
+                "UPDATE chat_sessions SET updated_at = now() WHERE id = $1",
+                session_id,
+            )
+            await conn.execute(
+                "INSERT INTO audit_log (user_id, action, resource_type, resource_id, "
+                "llm_model, llm_tokens, payload) "
+                "VALUES ($1, 'chat.message', 'chat_message', $2, $3, $4, $5)",
+                user_uuid,
+                session_id,
+                result.get("model_used"),
+                result.get("tokens_used"),
+                json.dumps({"reasoning_mode": mode}),
+            )
+
+    from agents.memory_agent import store_memory
+
+    candidates = result.get("memory_candidates", [])
+    stored_count = 0
     try:
-        # Save user message
-        await pool.execute(
-            "INSERT INTO chat_messages (session_id, role, content, reasoning_mode) "
-            "VALUES ($1, 'user', $2, $3)",
-            session_id,
-            message,
-            mode,
-        )
-        # Save assistant message
-        await pool.execute(
-            "INSERT INTO chat_messages (session_id, role, content, thinking_trace, "
-            "model_used, reasoning_mode, tokens_used, latency_ms) "
-            "VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7)",
-            session_id,
-            result.get("response", ""),
-            json.dumps(result.get("thinking_trace", [])),
-            result.get("model_used"),
-            result.get("reasoning_mode"),
-            result.get("tokens_used"),
-            result.get("latency_ms"),
-        )
-        # Update session timestamp
-        await pool.execute(
-            "UPDATE chat_sessions SET updated_at = now() WHERE id = $1",
-            session_id,
-        )
-        # Write audit log
-        await pool.execute(
-            "INSERT INTO audit_log (user_id, action, resource_type, resource_id, "
-            "llm_model, llm_tokens, payload) "
-            "VALUES ($1, 'chat.message', 'chat_message', $2, $3, $4, $5)",
-            user_uuid,
-            session_id,
-            result.get("model_used"),
-            result.get("tokens_used"),
-            json.dumps({"reasoning_mode": mode}),
-        )
-
-        # ─── Auto-extract memory candidates ─────────────
-        from agents.memory_agent import store_memory
-
-        candidates = result.get("memory_candidates", [])
-        stored_count = 0
         for c in candidates:
             memory_id = await store_memory(
                 content=c["content"],
@@ -684,9 +680,14 @@ async def _persist_chat_and_extract_memory(
                 stored_count += 1
         if stored_count > 0:
             print(f"[chat] Auto-stored {stored_count} memory candidates from chat")
-
     except Exception as e:
-        print(f"DB persist warning: {e}")
+        print(f"[chat] Memory extraction warning (best-effort): {e}")
+
+    return {
+        "assistant_message_id": str(assistant_row["id"]),
+        "stored_memory_count": stored_count,
+        "session_id": session_id,
+    }
 
 
 @app.post("/chat")
@@ -780,21 +781,7 @@ async def chat_stream(request: dict):
                 yield f"event: token\ndata: {json.dumps({'delta': chunk + ' '})}\n\n"
                 await asyncio.sleep(0.01)
 
-            # Send done event with metadata
-            done_data = json.dumps(
-                {
-                    "message_id": None,
-                    "model_used": result.get("model_used"),
-                    "reasoning_mode": result.get("reasoning_mode"),
-                    "tokens_used": result.get("tokens_used"),
-                    "latency_ms": result.get("latency_ms"),
-                    "memory_candidates": result.get("memory_candidates", []),
-                }
-            )
-            yield f"event: done\ndata: {done_data}\n\n"
-
-            # Persist + auto-extract after streaming
-            await _persist_chat_and_extract_memory(
+            persist_result = await _persist_chat_and_extract_memory(
                 message=message,
                 result=result,
                 mode=mode,
@@ -803,6 +790,19 @@ async def chat_stream(request: dict):
                 pool=pool,
                 surface=surface,
             )
+
+            # Send done event only after transcript is durable in DB
+            done_data = json.dumps(
+                {
+                    "message_id": persist_result.get("assistant_message_id"),
+                    "model_used": result.get("model_used"),
+                    "reasoning_mode": result.get("reasoning_mode"),
+                    "tokens_used": result.get("tokens_used"),
+                    "latency_ms": result.get("latency_ms"),
+                    "memory_candidates": result.get("memory_candidates", []),
+                }
+            )
+            yield f"event: done\ndata: {done_data}\n\n"
 
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'code': 'CHAT_002', 'message': str(e)})}\n\n"

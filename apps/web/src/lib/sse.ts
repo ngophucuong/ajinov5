@@ -116,12 +116,12 @@ export async function streamChatMessage(
 // ─── Stream session creation ──────────────────────────
 export async function createSessionAndStream(
   firstMessage: string,
-  reasoningMode: ReasoningMode,
-  callbacks: SSEController,
+  _reasoningMode: ReasoningMode,
+  _callbacks: SSEController,
 ): Promise<string> {
   const token = getToken();
   if (!token) {
-    callbacks.onError("AUTH_004", "JWT_INVALID");
+    _callbacks.onError("AUTH_004", "JWT_INVALID");
     throw new Error("Not authenticated");
   }
 
@@ -138,7 +138,7 @@ export async function createSessionAndStream(
 
   const body = await res.json();
   if (!res.ok) {
-    callbacks.onError(
+    _callbacks.onError(
       body.error?.code || "CHAT_001",
       body.error?.message || "SESSION_NOT_FOUND",
     );
@@ -146,7 +146,6 @@ export async function createSessionAndStream(
   }
 
   const sessionId = body.data.id;
-  void streamChatMessage(sessionId, firstMessage, reasoningMode, callbacks);
   return sessionId;
 }
 
