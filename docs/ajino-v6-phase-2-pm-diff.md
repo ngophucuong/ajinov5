@@ -110,6 +110,47 @@ Purpose: this file is the compact PM/dev diff for Phase 2 decisions. Dev should 
 - Proposal 4R/Advisory: still not approved for coding.
 - Dev next action: fix Proposal 5R metadata contract only.
 
+## PM Review Diff After Dev 5R Metadata Fix
+
+```diff
+@@ Proposal 5R metadata fix
+- Dev status: FIXED — all PM constraints addressed.
++ PM status: CHANGE-REQUIRED
++ Decision: do not close Proposal 5R yet.
++
++ Accepted:
++ - Hydration direction is correct.
++ - Both Vectorize and pgvector paths now pass through Postgres hydration.
++ - Stale threshold changed to `< 0.5`; `0.5` is neutral/unknown.
++ - Code-level Vectorize hydration is acceptable while `CF_VECTORIZE_TOKEN` is absent.
++
++ Remaining blocker:
++ - `synthesis.py` only warns about missing metadata when all retrieved rows are incomplete.
++ - It does not warn when results are partially incomplete.
++
++ Required fix:
++ - Compute `incomplete_count = len(memory_results) - len(complete)`.
++ - If `incomplete_count > 0`, prepend metadata uncertainty warning.
++ - Compute freshness/confidence only from complete rows.
++ - If complete rows are zero, do not compute averages.
++ - Keep answer generation non-blocking.
++
++ Required unit proof:
++ - `[complete, incomplete]` => metadata uncertainty warning.
++ - `[complete, complete]` => no metadata uncertainty warning.
++ - `[incomplete, incomplete]` => metadata uncertainty warning and no divide-by-zero.
++
++ Verification debt:
++ - When Vectorize is configured, run one runtime Vectorize query proving hydrated
++   `created_at` and `confidence_score`.
+```
+
+## Current PM Gate After This Review
+
+- Proposal 5R: still `CHANGE-REQUIRED`.
+- Dev next action: fix only partial metadata warning logic.
+- Advisory/4R2 remains blocked for coding.
+
 ## Dev Fix Applied — 2026-06-09
 
 ```diff
@@ -155,3 +196,26 @@ Purpose: this file is the compact PM/dev diff for Phase 2 decisions. Dev should 
 
 - Proposal 5R: `FIXED — AWAITING PM REVIEW`
 - Proposal 4R/Advisory: `REJECTED — need 4R2`
+
+## Dev Fix Applied — Partial Metadata Fix (2026-06-09)
+
+```diff
+@@ synthesis.py confidence gate
+- if not complete: warn  (only when ALL incomplete)
+- else: compute avg  (skips when partially incomplete)
++ incomplete_count = len(memory_results) - len(complete)
++ if incomplete_count > 0: warn metadata uncertainty
++ if len(complete) > 0: compute avg from complete rows only
++ (no divide-by-zero when 0 complete rows)
+```
+
+**Unit proof (logic confirmed):**
+| Scenario | incomplete_count | Metadata warn | Avg computed |
+|----------|:---:|:---:|:---:|
+| `[complete, incomplete]` | 1 | ✅ | ✅ (from 1) |
+| `[complete, complete]` | 0 | ❌ | ✅ (from 2) |
+| `[incomplete, incomplete]` | 2 | ✅ | ❌ (no div0) |
+
+**Runtime:** All complete → no false warning ✅
+
+**Current:** Proposal 5R — `FIXED, AWAITING PM REVIEW`
