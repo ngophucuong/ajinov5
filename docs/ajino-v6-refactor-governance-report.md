@@ -1729,3 +1729,187 @@ PM reviewed:
 **Gate for new work:**
 - Mọi thay đổi mới về Advisory routing/output, retrieval, schema, UI, hoặc Deep Research phải nộp proposal mới trong §13.
 - Không tự ý thêm code vào các area trên.
+
+### 2026-06-09 — PM Governance Scope For Phase 3+
+
+**PM status:** PHASE-3-SCOPE-OPENED
+
+**Decision:** Phase 3 is opened for proposals only. No Phase 3 coding is approved yet.
+
+**Primary objective:** stabilize the v6 core already delivered in Phase 1 and Phase 2 so it can be released safely from v5 to v6.
+
+Phase 3 is not a new feature expansion phase. It is a hardening and release-readiness phase.
+
+**Allowed Phase 3 proposal areas:**
+- Regression tests for Phase 1 and Phase 2 contracts:
+  - source normalization
+  - Memory Review API
+  - freshness/confidence gate
+  - Advisory routing
+  - Advisory section enforcement
+- End-to-end verification:
+  - Chat → memory extraction → review → retrieval → synthesis
+  - Studio → compile → memory → retrieval
+  - Capture → commit → memory → retrieval
+- Observability and audit hardening:
+  - trace fields
+  - audit_log coverage
+  - runtime logs for retrieval backend, confidence gate, and Advisory routing decisions
+- API contract cleanup:
+  - response envelopes
+  - error status correctness
+  - removal of remaining mock/fallback paths that violate zero-mock rules
+- Minimal UI wiring only if needed to expose already-built backend contracts:
+  - Memory Review visibility
+  - Advisory/Confidence warnings display
+  - no UI redesign
+
+**Explicitly blocked in Phase 3 unless separately proposed and approved:**
+- Deep Research.
+- Graph/entity/insight engine.
+- New DB schema beyond indexes or non-breaking metadata additions.
+- Retrieval ranking algorithm changes.
+- Advisory routing changes beyond bug fixes against the approved contract.
+- New LLM provider/model routing changes.
+- UI redesign or new Studio workspace redesign.
+- Any broad "v6 architecture rewrite" without a narrow proposal.
+
+**Required proposal format for Phase 3:**
+Each proposal must be appended under §13 or a Phase 3 section and must include:
+- Proposal ID: `Proposal 2026-06-09-7`, `8`, etc.
+- Scope: one sentence.
+- Problem: concrete bug/risk/gap.
+- Current code path: exact files/functions.
+- Proposed change: exact files/functions allowed.
+- Non-goals: what the dev will not touch.
+- Verification: unit, API, runtime, SQL, or UI proof as applicable.
+- Rollback: how to revert safely.
+- PM Decision: `PENDING`.
+
+**Phase 3 first approved direction:** Dev may prepare proposals only.
+
+**Recommended first proposals:**
+- `Proposal 7 — Regression Test Harness For V6 Core Contracts`
+- `Proposal 8 — E2E Runtime Verification Matrix`
+- `Proposal 9 — Zero-Mock And Error Contract Audit`
+
+**PM gate:** No Phase 3 implementation is approved until PM sets each proposal to `APPROVED`.
+
+**Reference:** concise scope is also recorded in `docs/ajino-v6-phase-3-governance-scope.md`.
+
+---
+
+## Proposal 2026-06-09-7 — Regression Test Harness For V6 Core Contracts
+**Owner:** Dev (AI agent)
+**Status:** PROPOSED
+**Phase:** 3
+**Scope:** Add regression tests for v6 core: source tracking, Memory Review API, freshness/confidence gate, Advisory routing + enforcement.
+
+### Problem
+V6 đã thay đổi memory schema, retrieval pipeline, chat output format, và API contracts. Không có test regression nào đảm bảo các contract này không bị phá vỡ khi sửa code sau này.
+
+### Current code path
+- `services/agno/main.py:1220-1301` — Memory Review API (3 endpoints)
+- `services/agno/agents/memory_agent.py:275-308` — retrieve_memories with hydration
+- `services/agno/agents/synthesis.py:30-56` — confidence/freshness gate
+- `services/agno/agents/synthesis.py:107-145` — Advisory enforcement
+- `services/agno/agents/orchestrator.py:47-90` — is_advisory_query()
+- Existing tests: `tests/` có 12 spec files nhưng chưa cover v6 contracts
+
+### Proposed change
+Thêm tests vào `tests/`:
+1. `tests/v6-memory-api.spec.ts` — test Memory Review API (inject toggle, review status, archive) + curl
+2. `tests/v6-freshness-gate.spec.ts` — unit test compute_freshness() + confidence gate logic
+3. `tests/v6-advisory-routing.spec.ts` — unit test is_advisory_query() 6 routing cases
+4. `tests/v6-source-tracking.spec.ts` — SQL proof source_ref cho chat/capture/studio
+
+### Non-goals
+- Không sửa code sản phẩm
+- Không thêm E2E browser test (để Proposal 8)
+- Không thay đổi test framework
+
+### Verification
+- `npm run build` passed
+- Mỗi test file chạy độc lập
+- Unit test không cần runtime (pure logic)
+
+### Rollback
+Xóa file test.
+
+### PM Decision
+PENDING
+
+---
+
+## Proposal 2026-06-09-8 — E2E Runtime Verification Matrix
+**Owner:** Dev (AI agent)
+**Status:** PROPOSED
+**Phase:** 3
+**Scope:** End-to-end runtime verification: Chat→memory→review→retrieval→synthesis, Studio→compile→memory→retrieval, Capture→commit→memory→retrieval.
+
+### Problem
+Không có E2E test nào chạy thực tế flow đầy đủ từ input đến output trên production. Phase 1+2 verification là manual curl, không repeatable.
+
+### Current code path
+- `POST /chat` → `orchestrator.run_pipeline()` → `synthesize()` → `_persist_chat_and_extract_memory()`
+- `POST /studio/documents/{id}/compile` → chunk → `INSERT INTO memory`
+- `POST /capture/{id}/commit` → `store_memory()`
+- `GET /memory/search` → `retrieve_memories()` → hydrate → synthesis
+
+### Proposed change
+Tạo `tests/v6-e2e-matrix.sh`:
+1. Chat E2E: gửi message → verify DB có chat_messages + memory với source_ref đúng + response có Advisory format nếu deep
+2. Studio E2E: tạo document → compile → verify memory rows với source_ref = document_id
+3. Capture E2E: tạo capture → chờ extract → commit → verify memory rows với source_ref = capture_id
+4. Retrieval E2E: query → verify memory_results có freshness_score, stale, confidence_score, metadata_complete
+
+### Non-goals
+- Không sửa backend code
+- Không thêm mock data
+
+### Verification
+- Script chạy được từ local hoặc VPS
+- Mỗi step có pass/fail output rõ ràng
+
+### Rollback
+Xóa script.
+
+### PM Decision
+PENDING
+
+---
+
+## Proposal 2026-06-09-9 — Zero-Mock And Error Contract Audit
+**Owner:** Dev (AI agent)
+**Status:** PROPOSED
+**Phase:** 3
+**Scope:** Audit toàn bộ codebase đảm bảo: không mock response, error code đúng contract, response envelope chuẩn.
+
+### Problem
+AGENTS.md §8 yêu cầu ZERO-MOCK, nhưng chưa có audit xác nhận toàn bộ endpoint tuân thủ. Một số chỗ có thể return 200 trên error hoặc dùng mock/placeholder.
+
+### Current code path (cần audit)
+- `services/agno/main.py` — tất cả endpoint
+- `services/agno/agents/memory_agent.py` — `_mock_embedding()` (có ⚠️ ASSUMPTION marker)
+- `apps/worker/src/index.ts` — proxy, auth endpoints
+- `apps/web/src/lib/api.ts` — frontend error handling
+
+### Proposed change
+1. Grep toàn bộ codebase tìm: `mock`, `fake`, `ok: true`, `placeholder`, `Math.random`, `TODO`, `⚠️ ASSUMPTION`
+2. Lập bảng audit: file, dòng, vấn đề, severity (P0/P1/P2)
+3. Với mỗi P0: sửa hoặc đề xuất proposal riêng
+4. Verify: mọi endpoint return `{data, error}` đúng format, error code khớp `PROJECT_CONTRACT.yaml`
+
+### Non-goals
+- Không sửa business logic
+- Không thay đổi behavior của endpoint đang hoạt động đúng
+
+### Verification
+- Bảng audit hoàn chỉnh trong `docs/ajino-v6-zero-mock-audit.md`
+- 0 P0 issues còn tồn tại
+
+### Rollback
+Revert từng fix riêng lẻ.
+
+### PM Decision
+PENDING
