@@ -2405,12 +2405,13 @@ def chunk_markdown_v2(content: str) -> list:
 
 
 def chunk_by_paragraph(content: str) -> list:
+    MIN_CHARS = 20  # v6 P2 fix: was 50, lowered for short documents
     chunks = []
     current = []
     for line in content.split("\n"):
         if line.strip() == "" and current:
             chunk = "\n".join(current).strip()
-            if len(chunk) >= 50:
+            if len(chunk) >= MIN_CHARS:
                 if len(chunk) > 800:
                     # Sub-split long paragraphs by sentence
                     sentences = re.split(r"(?<=[.!?])\s+", chunk)
@@ -2429,7 +2430,7 @@ def chunk_by_paragraph(content: str) -> list:
             current.append(line)
     if current:
         chunk = "\n".join(current).strip()
-        if len(chunk) >= 50:
+        if len(chunk) >= MIN_CHARS:
             chunks.append(chunk)
     return chunks
 
