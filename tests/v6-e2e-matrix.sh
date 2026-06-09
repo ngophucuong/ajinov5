@@ -156,8 +156,7 @@ if [ -n "$CAP_ID" ]; then
         fail "Capture commit" "0 memory rows"
       fi
     else
-      echo "  ⚠️  Capture extraction gap: status=$CAP_STATUS facts=$EXTRACTED"
-      echo "  📋 Documented as runtime gap — async extraction pipeline may need attention"
+      fail "Capture extraction" "0 facts after 30s — async pipeline gap (status=$CAP_STATUS)"
     fi
 else
     fail "Capture creation" "failed"
