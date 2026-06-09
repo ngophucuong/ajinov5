@@ -34,11 +34,16 @@ async def synthesize(
             confidence_warning = "Tôi không tìm thấy thông tin liên quan trong bộ nhớ."
         else:
             complete = [r for r in memory_results if r.get("metadata_complete", False)]
-            if not complete:
+            incomplete_count = len(memory_results) - len(complete)
+
+            # Warn about any incomplete metadata
+            if incomplete_count > 0:
                 confidence_warning += (
                     "⚠️ Không thể đánh giá độ tin cậy của một số thông tin. "
                 )
-            else:
+
+            # Compute freshness/confidence only from complete rows
+            if len(complete) > 0:
                 freshness_scores = [r.get("freshness_score", 1.0) for r in complete]
                 confidence_scores = [r.get("confidence_score", 0.7) for r in complete]
                 avg_freshness = sum(freshness_scores) / len(freshness_scores)
