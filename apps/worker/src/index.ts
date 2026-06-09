@@ -49,6 +49,71 @@ async function createJWT(
     .sign(new TextEncoder().encode(secret));
 }
 
+// ─── Telegram Mini App initData validation ──────────────
+// Algorithm: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+async function validateTelegramInitData(
+  initData: string,
+  botToken: string,
+): Promise<{ valid: boolean; user?: { id: number; first_name?: string } }> {
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return { valid: false };
+
+  // Build data-check-string: sorted keys (excluding hash), joined by \n
+  const keys: string[] = [];
+  params.forEach((_, key) => {
+    if (key !== "hash") keys.push(key);
+  });
+  keys.sort();
+  const dataCheckString = keys.map((k) => `${k}=${params.get(k)}`).join("\n");
+
+  // Compute secret key: HMAC-SHA256("WebAppData", bot_token)
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode("WebAppData");
+  const botTokenData = encoder.encode(botToken);
+  const secretKey = await crypto.subtle.importKey(
+    "raw",
+    botTokenData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const secretSig = await crypto.subtle.sign("HMAC", secretKey, keyData);
+
+  // Compute HMAC of data-check-string with secret_key
+  const hmacKey = await crypto.subtle.importKey(
+    "raw",
+    secretSig,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const computedSig = await crypto.subtle.sign(
+    "HMAC",
+    hmacKey,
+    encoder.encode(dataCheckString),
+  );
+  const computedHash = Array.from(new Uint8Array(computedSig))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  if (computedHash !== hash) return { valid: false };
+
+  // Parse user from initData
+  const userStr = params.get("user");
+  let user: { id: number; first_name?: string } | undefined;
+  if (userStr) {
+    try {
+      const parsed = JSON.parse(userStr);
+      user = { id: parsed.id, first_name: parsed.first_name };
+    } catch {
+      // user field might not be valid JSON
+    }
+  }
+
+  return { valid: true, user };
+}
+
 // ─── TELEGRAM ─────────────────────────────────────────
 async function sendTelegramMessage(
   token: string,
@@ -275,6 +340,56 @@ app.post("/auth/logout", (c: Context<{ Bindings: Bindings }>) => {
   );
   return c.json({ data: null });
 });
+
+// Auth: Telegram Mini App initData validation → JWT
+app.post(
+  "/auth/telegram/miniapp",
+  async (c: Context<{ Bindings: Bindings }>) => {
+    const body = await c.req.json().catch(() => ({}));
+    const initData = body.init_data || body.initData || "";
+
+    if (!initData) {
+      return c.json(
+        {
+          data: null,
+          error: { code: "AUTH_001", message: "Missing initData" },
+        },
+        400,
+      );
+    }
+
+    const result = await validateTelegramInitData(
+      initData,
+      c.env.TELEGRAM_BOT_TOKEN,
+    );
+    if (!result.valid || !result.user) {
+      return c.json(
+        {
+          data: null,
+          error: { code: "AUTH_001", message: "Invalid initData signature" },
+        },
+        401,
+      );
+    }
+
+    const telegramId = result.user.id;
+    const token = await createJWT(
+      { sub: String(telegramId), role: "ceo", telegram_id: telegramId },
+      c.env.JWT_SECRET,
+    );
+
+    return c.json({
+      data: {
+        token,
+        user: {
+          telegram_id: telegramId,
+          name: result.user.first_name || "CEO",
+          role: "ceo",
+        },
+      },
+    });
+  },
+);
 
 // ─── PROTECTED ROUTES (JWT required) ───────────────────
 // Accept JWT from Authorization header OR cookie

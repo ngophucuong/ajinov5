@@ -21,6 +21,7 @@ import {
   getSchedule,
 } from "../lib/api";
 import { streamChatMessage } from "../lib/sse";
+import { setToken, getToken } from "../lib/auth";
 
 // ─── Telegram WebApp globals ─────────────────────────
 declare global {
@@ -204,6 +205,27 @@ export default function Miniapp() {
       tg.expand();
       tg.enableClosingConfirmation();
     }
+
+    // Auth via Telegram initData (Mini App không dùng OTP)
+    async function auth() {
+      if (getToken()) return; // already authenticated
+      const initData = tg?.initData || "";
+      if (!initData) return;
+      try {
+        const res = await fetch("/auth/telegram/miniapp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ init_data: initData }),
+        });
+        const body = await res.json();
+        if (body.data?.token) {
+          setToken(body.data.token);
+        }
+      } catch {
+        // silent — will retry on next API call or reload
+      }
+    }
+    auth();
 
     // Clock
     const clockInterval = setInterval(
