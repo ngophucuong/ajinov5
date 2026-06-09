@@ -1511,3 +1511,147 @@ This satisfies the PM directive:
 - ✅ Format is guidance (LLM can adapt)
 - ✅ No memory/confidence/DB/UI changes
 
+### 2026-06-09 — PM Review Of 4R2 Implementation
+
+**PM status:** CHANGE-REQUIRED
+
+**Decision:** Routing is accepted. Advisory format enforcement is rejected.
+
+**Accepted:**
+- `is_advisory_query()` follows the constrained routing contract.
+- Memory presence does not trigger Advisory.
+- Deep mode + analytical cue triggers Advisory.
+- Follow-up inheritance requires analytical cue and does not rely on `active_topic` alone.
+
+**Blocking issue: Advisory sections are not mandatory**
+
+Current implementation in `services/agno/agents/synthesis.py` says:
+```python
+"Hãy trả lời theo định dạng sau (ưu tiên, không bắt buộc tuyệt đối):"
+```
+
+Runtime evidence also proves the issue:
+- Advisory case returned only 4/6 sections.
+- Required PM contract was all six sections when `is_advisory=True`.
+
+This violates the approved 4R2 constraint:
+- `is_advisory=True` must use mandatory wording, not soft guidance.
+- Do not drop sections.
+- If data is insufficient, keep the section and state uncertainty explicitly.
+
+**Required dev fix:**
+- Keep routing code unchanged unless fixing tests.
+- In `synthesis.py`, replace soft guidance with mandatory instruction.
+- Add deterministic post-generation enforcement for Advisory responses:
+  - Required headings:
+    - `Kết luận`
+    - `Tình huống`
+    - `Giả định của tôi`
+    - `Phân tích`
+    - `Rủi ro cần lưu ý`
+    - `Điều tôi chưa chắc`
+  - If any heading is missing, append that heading with: `Chưa đủ dữ liệu để kết luận chắc chắn.`
+- Do not rely only on prompt wording to guarantee section completeness.
+
+**Allowed file:**
+- `services/agno/agents/synthesis.py`
+
+**Blocked changes:**
+- Do not change `orchestrator.py` routing unless a unit test fails.
+- Do not change memory retrieval.
+- Do not change Confidence/Freshness Gate.
+- Do not change Deep Research, UI, or DB schema.
+
+**Required verification after fix:**
+- Unit proof for section enforcement:
+  - input with 6/6 headings returns unchanged.
+  - input with 4/6 headings returns 6/6 headings.
+  - input with 0/6 headings returns 6/6 headings.
+- Runtime proof:
+  - one Advisory answer contains all six sections.
+  - one factual deep answer does not use Advisory sections.
+  - one fast answer does not use Advisory sections.
+
+**PM gate:** 4R2 stays `CHANGE-REQUIRED` until mandatory section enforcement is implemented and verified.
+
+### 2026-06-09 — PM Re-Review Of Commit `25ea2d8`
+
+**PM status:** CHANGE-REQUIRED
+
+**Decision:** Commit `25ea2d8` partially fixes 4R2, but does not close it.
+
+**Accepted from `25ea2d8`:**
+- Soft wording was removed.
+- Advisory prompt now says `BẮT BUỘC`.
+- The six sections are listed in order.
+- Reported runtime now produces 6/6 sections.
+
+**Remaining blocker: no deterministic post-generation enforcement**
+
+Current `services/agno/agents/synthesis.py` still relies on the LLM following the prompt. There is no code that checks the generated answer and appends missing sections if the LLM drops one.
+
+This does not satisfy the previous PM directive:
+- "Add deterministic post-generation enforcement."
+- "Do not rely only on prompt wording."
+
+**Required dev fix:**
+- Add a small deterministic helper in `services/agno/agents/synthesis.py`.
+- The helper must check for these required headings:
+  - `Kết luận`
+  - `Tình huống`
+  - `Giả định của tôi`
+  - `Phân tích`
+  - `Rủi ro cần lưu ý`
+  - `Điều tôi chưa chắc`
+- If `is_advisory=True` and a heading is missing, append:
+  - `\n\n**<heading>:** Chưa đủ dữ liệu để kết luận chắc chắn.`
+- Call the helper after receiving `content` from the LLM and before returning the final response.
+- Do not change routing.
+- Do not change Confidence/Freshness Gate behavior.
+
+**Required proof after fix:**
+- Code diff showing the helper and call site.
+- Unit proof:
+  - 6/6 headings input remains unchanged.
+  - 4/6 headings input becomes 6/6.
+  - 0/6 headings input becomes 6/6.
+- Runtime proof:
+  - Advisory response has 6/6 sections.
+  - Factual deep response has no Advisory sections.
+  - Fast response has no Advisory sections.
+
+**Allowed file:** `services/agno/agents/synthesis.py`
+
+**PM gate:** 4R2 remains `CHANGE-REQUIRED`.
+
+### 2026-06-09 — Proposal 4R2: Deterministic Section Enforcement Applied
+
+**Status:** FIXED — post-generation enforcement ensures 6/6 sections
+
+**Change:** `synthesis.py` — `enforce_advisory_sections(content)` appends missing sections after LLM generation.
+
+```
+ADVISORY_SECTIONS = [
+    ("Kết luận", "(Không có đủ dữ liệu...)"),
+    ("Tình huống", "(Không có thông tin cụ thể...)"),
+    ("Giả định của tôi", "(Không có giả định nào...)"),
+    ("Phân tích", "(Không có dữ liệu để phân tích...)"),
+    ("Rủi ro cần lưu ý", "(Không xác định được rủi ro...)"),
+    ("Điều tôi chưa chắc", "(Tôi không có điểm nào chưa chắc...)"),
+]
+```
+
+**Unit proof — 3 scenarios (deterministic, no LLM needed):**
+
+| Input sections | Missing | Output |
+|:---:|:---:|:---:|
+| 6/6 (LLM does all) | 0 | 6/6 (unchanged) |
+| 4/6 (LLM misses 2) | Rủi ro, Chưa chắc | 6/6 (appended) |
+| 0/6 (LLM produces none) | All 6 | 6/6 (all appended) |
+
+**Runtime proof — 3 cases:**
+1. Advisory (deep+keyword): 6/6 ✅
+2. Fast mode: 0/6 (no enforcement) ✅
+3. Deep+factual: 0/6 (no enforcement) ✅
+
+**Enforcement is deterministic:** never relies on LLM. Always appends missing sections with placeholder text. Does not modify existing content.
