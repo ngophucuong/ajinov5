@@ -366,48 +366,87 @@ app.all("/telegram/*", async (c: Context<{ Bindings: Bindings }>) => {
   }
 });
 
+// Helper: extract JWT user headers for proxied requests
+function getJwtHeaders(
+  c: Context<{ Bindings: Bindings }>,
+): Record<string, string> {
+  const payload = c.get("jwtPayload") as Record<string, unknown> | undefined;
+  return {
+    "X-User-Id": String(payload?.sub || ""),
+    "X-Telegram-Id": String(payload?.telegram_id || ""),
+  };
+}
+
 // Chat API proxy
 app.all("/api/chat/*", (c: Context<{ Bindings: Bindings }>) => {
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+  return proxyToVPS(
+    c.req.raw,
+    c.req.path.replace("/api", ""),
+    getJwtHeaders(c),
+  );
 });
 
 // Memory API proxy
 app.all("/api/memory/*", (c: Context<{ Bindings: Bindings }>) => {
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+  return proxyToVPS(
+    c.req.raw,
+    c.req.path.replace("/api", ""),
+    getJwtHeaders(c),
+  );
 });
 
 // User API proxy (adaptive mode, etc.)
 app.all("/api/user/*", (c: Context<{ Bindings: Bindings }>) => {
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+  return proxyToVPS(
+    c.req.raw,
+    c.req.path.replace("/api", ""),
+    getJwtHeaders(c),
+  );
 });
 
 // Ops API proxy (schedule, etc.)
 app.all("/api/ops/*", (c: Context<{ Bindings: Bindings }>) => {
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+  return proxyToVPS(
+    c.req.raw,
+    c.req.path.replace("/api", ""),
+    getJwtHeaders(c),
+  );
 });
 
 // Capture API proxy
 app.all("/api/capture/*", (c: Context<{ Bindings: Bindings }>) => {
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+  return proxyToVPS(
+    c.req.raw,
+    c.req.path.replace("/api", ""),
+    getJwtHeaders(c),
+  );
 });
 
 // Studio API proxy
 app.all("/api/studio/*", (c: Context<{ Bindings: Bindings }>) => {
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+  return proxyToVPS(
+    c.req.raw,
+    c.req.path.replace("/api", ""),
+    getJwtHeaders(c),
+  );
 });
 
 // Console API proxy
 app.all("/api/console/*", (c: Context<{ Bindings: Bindings }>) => {
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""));
+  return proxyToVPS(
+    c.req.raw,
+    c.req.path.replace("/api", ""),
+    getJwtHeaders(c),
+  );
 });
 
 // Research API proxy (Deep Research V2 — async job, with user_id injection)
 app.all("/api/research/*", (c: Context<{ Bindings: Bindings }>) => {
-  const payload = c.get("jwtPayload") as Record<string, unknown> | undefined;
-  return proxyToVPS(c.req.raw, c.req.path.replace("/api", ""), {
-    "X-User-Id": String(payload?.sub || ""),
-    "X-Telegram-Id": String(payload?.telegram_id || ""),
-  });
+  return proxyToVPS(
+    c.req.raw,
+    c.req.path.replace("/api", ""),
+    getJwtHeaders(c),
+  );
 });
 
 // Research API proxy (direct, unauthenticated — for polling status)

@@ -691,11 +691,11 @@ async def _persist_chat_and_extract_memory(
 
 
 @app.post("/chat")
-async def chat(request: dict):
+async def chat(request: dict, req: Request):
     """Main chat endpoint — runs full pipeline, persists to DB."""
     message = request.get("message") or request.get("content") or ""
     mode = request.get("reasoning_mode", "auto")
-    user_id = request.get("user_id")
+    user_id = request.get("user_id") or req.headers.get("X-User-Id")
     session_id = request.get("session_id")
     surface = request.get("surface", "web")
 
@@ -737,11 +737,11 @@ async def chat(request: dict):
 
 # ─── Chat SSE Stream ────────────────────────────────────
 @app.post("/chat/stream")
-async def chat_stream(request: dict):
+async def chat_stream(request: dict, req: Request):
     """Chat endpoint with SSE streaming."""
     message = request.get("message") or request.get("content") or ""
     mode = request.get("reasoning_mode", "auto")
-    user_id = request.get("user_id")
+    user_id = request.get("user_id") or req.headers.get("X-User-Id")
     session_id = request.get("session_id")
     surface = request.get("surface", "web")
 
