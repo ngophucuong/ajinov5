@@ -77,7 +77,9 @@ async def run_pipeline(
     start_time = time.time()
 
     # Stage 0: Context assembly — fetch latest history, resolve follow-up, build dialogue state
-    recent_messages = []
+    session_messages = []
+    recent_turns = []
+    relevant_turns = []
     conversation_history = ""
     dialogue_state = {
         "active_topic": "",
@@ -92,24 +94,30 @@ async def run_pipeline(
     if session_id and db_pool:
         t_ctx = time.time()
         try:
+            from .conversation_retrieval import build_context_windows
             from .followup_resolver import resolve_followup
 
             rows = await db_pool.fetch(
                 "SELECT role, content FROM chat_messages "
-                "WHERE session_id = $1 ORDER BY created_at DESC LIMIT 10",
+                "WHERE session_id = $1 ORDER BY created_at DESC LIMIT 40",
                 session_id,
             )
             if rows:
-                recent_messages = [dict(r) for r in reversed(rows)]
-                history_parts = []
-                for r in recent_messages:
-                    prefix = "User" if r["role"] == "user" else "Assistant"
-                    history_parts.append(f"{prefix}: {r['content'][:500]}")
-                conversation_history = "\n".join(history_parts)
+                session_messages = [dict(r) for r in reversed(rows)]
+                context_windows = build_context_windows(
+                    latest_user_message=message,
+                    session_messages=session_messages,
+                    recent_limit=6,
+                    relevant_limit=8,
+                )
+                recent_turns = context_windows.get("recent_turns", [])
+                relevant_turns = context_windows.get("relevant_turns", [])
+                conversation_history = context_windows.get("conversation_history", "")
 
                 dialogue_state = await resolve_followup(
                     latest_user_message=message,
-                    recent_messages=recent_messages,
+                    recent_turns=recent_turns,
+                    relevant_turns=relevant_turns,
                     litellm_url=litellm_url,
                     litellm_api_key=litellm_api_key,
                 )
@@ -125,7 +133,8 @@ async def run_pipeline(
                 "status": "done",
                 "duration_ms": int((time.time() - t_ctx) * 1000),
                 "result": (
-                    f"{dialogue_state.get('followup_type', 'new_topic')} -> "
+                    f"{dialogue_state.get('followup_type', 'new_topic')} | "
+                    f"recent={len(recent_turns)} relevant={len(relevant_turns)} -> "
                     f"{resolved_query[:120]}"
                 ),
             }

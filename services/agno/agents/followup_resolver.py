@@ -1,57 +1,33 @@
 """
 Ajino v5 — Follow-up Resolver
-Resolves ambiguous multi-turn follow-up messages into standalone queries.
-Heuristic-first, LLM as fallback for complex cases.
+Resolves the latest user turn using prior dialogue from both user and assistant.
 """
 
 import json
 
 import httpx
 
-# ─── Heuristic keywords for follow-up detection ─────────
-FOLLOWUP_KEYWORDS = [
-    "thêm",
-    "nói thêm",
-    "ý đó",
-    "ý này",
-    "cái trên",
-    "cái đó",
-    "so với",
-    "tiếp đi",
-    "vì sao",
-    "tại sao vậy",
-    "nói rõ hơn",
-    "giải thích thêm",
-    "làm rõ",
-    "chi tiết hơn",
-    "còn cái",
-    "ý số",
-    "ý thứ",
-    "điểm số",
-    "điểm thứ",
-    "phương án trên",
-    "kế hoạch trên",
-    "cách trên",
-    "nó là gì",
-    "nó hoạt động",
-    "cái này",
-    "còn nữa",
-    "mục đó",
-    "đoạn đó",
-    "phần đó",
-    "phần trên",
-    "ý kia",
-    "còn gì nữa",
-]
+
+def _format_turns(turns: list[dict]) -> str:
+    lines = []
+    for turn in turns:
+        role = "User" if turn.get("role") == "user" else "Assistant"
+        lines.append(f"{role}: {(turn.get('content') or '')[:900]}")
+    return "\n".join(lines)
+
 
 # ─── LLM Resolver Prompt ─────────────────────────────
-DIALOGUE_STATE_PROMPT = """Analyze the conversation and the user's latest follow-up message.
+DIALOGUE_STATE_PROMPT = """Analyze the conversation context and the user's latest message.
 Return JSON ONLY, no markdown, no explanation.
 
-Conversation (oldest → newest):
-{conversation}
+Recent turns (closest continuity):
+{recent_turns}
 
-Latest user message: "{message}"
+Relevant prior turns (older but semantically related):
+{relevant_turns}
+
+Latest user message:
+"{message}"
 
 Schema:
 {{
@@ -64,27 +40,20 @@ Schema:
 }}
 
 Rules:
-- followup_type="expand": user wants more detail on a previous point
-- followup_type="clarification": user asks "what do you mean by..."
-- followup_type="compare": user says "so với cái trên", "compared to..."
-- followup_type="continue": user says "tiếp đi", "go on"
-- followup_type="new_topic": user has clearly switched to a completely different topic
-- should_reset_context=true ONLY when the new topic is unrelated
-- referenced_points: extract the ACTUAL content of assistant points the user is referencing
-- resolved_query: MUST be a complete question that someone with NO context would understand
+- Use both user and assistant turns to infer what the latest message refers to.
+- referenced_points: extract the ACTUAL content of assistant points the user is referencing.
+- resolved_query: MUST be a complete standalone question that someone with NO context would understand.
+- If the latest message still relates to the ongoing topic, do NOT mark it as new_topic.
+- should_reset_context=true ONLY when the user has clearly moved to an unrelated topic.
+- followup_type="compare" when the user compares a new case to a prior recommendation.
+- followup_type="clarification" when the user is correcting or narrowing the reference.
 - Use the SAME language as the latest message"""
-
-
-def detect_followup(message: str) -> bool:
-    """Heuristic: check if message contains follow-up keywords."""
-    msg_lower = message.lower()
-    short_followup = len(msg_lower.split()) <= 8
-    return short_followup and any(kw in msg_lower for kw in FOLLOWUP_KEYWORDS)
 
 
 async def resolve_followup(
     latest_user_message: str,
-    recent_messages: list[dict],
+    recent_turns: list[dict],
+    relevant_turns: list[dict],
     litellm_url: str,
     litellm_api_key: str = "",
 ) -> dict:
@@ -93,16 +62,15 @@ async def resolve_followup(
 
     Args:
         latest_user_message: the most recent user message
-        recent_messages: list of {role, content} dicts (oldest→newest)
+        recent_turns: latest nearby turns (oldest→newest)
+        relevant_turns: semantically related older turns (oldest→newest)
         litellm_url: LiteLLM endpoint
         litellm_api_key: LiteLLM master key
 
     Returns:
         dialogue_state dict with resolved_query, followup_type, etc.
     """
-    is_followup = detect_followup(latest_user_message)
-
-    if not is_followup:
+    if not recent_turns and not relevant_turns:
         return {
             "active_topic": "",
             "user_intent": "new question",
@@ -112,15 +80,9 @@ async def resolve_followup(
             "should_reset_context": True,
         }
 
-    # Build conversation transcript for LLM
-    conversation_text = ""
-    for msg in recent_messages:
-        role_label = "User" if msg["role"] == "user" else "Assistant"
-        # Keep enough assistant content so LLM can map numbered points / bullets.
-        conversation_text += f"{role_label}: {msg['content'][:800]}\n"
-
     prompt = DIALOGUE_STATE_PROMPT.format(
-        conversation=conversation_text,
+        recent_turns=_format_turns(recent_turns) or "(none)",
+        relevant_turns=_format_turns(relevant_turns) or "(none)",
         message=latest_user_message,
     )
 
@@ -167,21 +129,27 @@ async def resolve_followup(
 
     # Fallback: heuristic
     last_assistant = ""
-    for msg in reversed(recent_messages):
-        if msg.get("role") == "assistant" and msg.get("content"):
-            last_assistant = msg["content"][:400]
+    last_user = ""
+    for msg in reversed(recent_turns or relevant_turns):
+        if not last_assistant and msg.get("role") == "assistant" and msg.get("content"):
+            last_assistant = msg["content"][:500]
+        if not last_user and msg.get("role") == "user" and msg.get("content"):
+            last_user = msg["content"][:300]
+        if last_assistant and last_user:
             break
 
     fallback_query = latest_user_message
-    if last_assistant:
+    if last_assistant or last_user:
         fallback_query = (
-            f"Dựa trên nội dung AI vừa trả lời: {last_assistant}\n\n"
-            f"Người dùng đang hỏi tiếp: {latest_user_message}"
+            "Dựa trên cuộc trao đổi trước đó, hãy trả lời tiếp cho yêu cầu sau.\n\n"
+            f"Ngữ cảnh trước đó của người dùng: {last_user or '(không có)'}\n"
+            f"Nội dung AI vừa trả lời: {last_assistant or '(không có)'}\n"
+            f"Yêu cầu mới nhất của người dùng: {latest_user_message}"
         )
 
     return {
         "active_topic": "",
-        "user_intent": "follow-up",
+        "user_intent": "continue previous discussion",
         "resolved_query": fallback_query,
         "followup_type": "continue",
         "referenced_points": [],
