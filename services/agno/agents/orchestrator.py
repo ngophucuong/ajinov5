@@ -32,6 +32,7 @@ ANALYTICAL_KEYWORDS = {
     "risk",
 }
 
+
 def query_complexity(text: str) -> Literal["fast", "deep"]:
     """Heuristic routing — NO ML, NO LLM call. Must run in microseconds."""
     word_count = len(text.split())
@@ -273,6 +274,7 @@ async def run_pipeline(
         sub_questions=sub_questions,
         search_results=search_results,
         memory_context=memory_context,
+        memory_results=memory_results,
         model=model,
         litellm_url=litellm_url,
         litellm_api_key=litellm_api_key,

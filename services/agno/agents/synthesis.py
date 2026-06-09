@@ -20,11 +20,30 @@ async def synthesize(
     litellm_url: str,
     litellm_api_key: str = "",
     memory_context: str = "",
+    memory_results: list | None = None,
     telegram_context: dict = None,
     conversation_history: str = "",
     dialogue_state: dict | None = None,
 ) -> dict:
     """Generate final response with context."""
+
+    # ─── v6 Confidence & Freshness Gate (Proposal 5R) ───
+    confidence_warning = ""
+    if memory_results is not None:
+        if len(memory_results) == 0:
+            confidence_warning = "Tôi không tìm thấy thông tin liên quan trong bộ nhớ."
+        else:
+            freshness_scores = [r.get("freshness_score", 1.0) for r in memory_results]
+            confidence_scores = [r.get("confidence_score", 0.7) for r in memory_results]
+            avg_freshness = sum(freshness_scores) / len(freshness_scores)
+            avg_confidence = sum(confidence_scores) / len(confidence_scores)
+            if avg_freshness < 0.5:
+                confidence_warning += (
+                    "⚠️ Một số thông tin tôi dùng có thể đã cũ (> 6 tháng). "
+                )
+            if avg_confidence < 0.6:
+                confidence_warning += "⚠️ Tôi không chắc hoàn toàn — nên kiểm tra lại."
+
     context = ""
     if search_results:
         for sr in search_results:
@@ -69,6 +88,12 @@ async def synthesize(
                     f"- Câu hỏi đã resolve đầy đủ: {resolved_query}"
                 ),
             }
+        )
+
+    # v6: inject confidence warning before reference data
+    if confidence_warning:
+        messages.append(
+            {"role": "system", "content": f"Lưu ý về độ tin cậy: {confidence_warning}"}
         )
 
     if context:
