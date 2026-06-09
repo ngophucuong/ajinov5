@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS memory (
   approved_at   TIMESTAMPTZ,
   approved_by   UUID REFERENCES users(id),
   decay_at      TIMESTAMPTZ,        -- NULL = no decay; set on approval
+  -- v6 structured fields
+  inject        BOOLEAN NOT NULL DEFAULT true,
+  review_status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (review_status IN ('pending','reviewed','excluded','edited')),
+  confidence_score REAL NOT NULL DEFAULT 0.7
+                CHECK (confidence_score >= 0.0 AND confidence_score <= 1.0),
+  entity_tags   TEXT[] DEFAULT '{}',
+  fact_type     TEXT NOT NULL DEFAULT 'observation'
+                CHECK (fact_type IN ('observation','decision','commitment','insight','risk','question')),
+  freshness_score REAL NOT NULL DEFAULT 1.0
+                CHECK (freshness_score >= 0.0 AND freshness_score <= 1.0),
   metadata      JSONB NOT NULL DEFAULT '{}',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

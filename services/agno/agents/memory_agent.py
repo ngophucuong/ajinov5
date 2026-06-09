@@ -227,6 +227,12 @@ async def retrieve_memories(
     if not results and db_pool:
         results = await _pgvector_search(embedding, top_k, db_pool)
 
+    # v6: enrich with computed freshness + confidence
+    for r in results:
+        r["freshness_score"] = compute_freshness(r)
+        r["stale"] = r["freshness_score"] < 0.5
+        r["confidence_score"] = r.get("confidence_score", 0.7)
+
     elapsed = int((time.time() - t0) * 1000)
     print(f"[memory_agent] retrieve_memories: {len(results)} results in {elapsed}ms")
 
@@ -276,6 +282,33 @@ async def store_memory(
 
 
 # ─── Memory Lifecycle ────────────────────────────────────
+
+from datetime import datetime, timezone
+
+
+def compute_freshness(memory_row: dict) -> float:
+    """
+    Compute freshness score at read time based on age.
+    Returns 0.0–1.0 where 1.0 = fresh, 0.2 = very old.
+    Facts are NEVER excluded — only tagged stale.
+    """
+    created_at = memory_row.get("created_at")
+    if not created_at:
+        return 0.5
+    if isinstance(created_at, str):
+        created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    age_days = (
+        datetime.now(timezone.utc) - created_at.replace(tzinfo=timezone.utc)
+    ).days
+    if age_days < 30:
+        return 1.0
+    elif age_days < 90:
+        return 0.8
+    elif age_days < 180:
+        return 0.6
+    elif age_days < 365:
+        return 0.4
+    return 0.2
 
 
 async def approve_memory(

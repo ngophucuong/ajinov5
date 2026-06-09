@@ -1217,6 +1217,84 @@ async def get_memory(memory_id: str):
     return {"data": result, "error": None}
 
 
+# ─── v6 Memory Review API ─────────────────────────────
+
+
+@app.patch("/memory/{memory_id}/inject")
+async def toggle_memory_inject(memory_id: str, request: dict):
+    """PATCH /memory/{id}/inject — Toggle inject on/off."""
+    inject_val = request.get("inject", None)
+    if inject_val is None or not isinstance(inject_val, bool):
+        raise HTTPException(
+            status_code=400, detail="Body must have 'inject': true/false"
+        )
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "UPDATE memory SET inject = $2 WHERE id = $1::uuid RETURNING id, inject",
+        memory_id,
+        inject_val,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    await pool.execute(
+        "INSERT INTO audit_log (action, resource_type, resource_id, payload) "
+        "VALUES ('memory.inject_toggle', 'memory', $1, $2)",
+        memory_id,
+        json.dumps({"inject": inject_val}),
+    )
+    return {"data": {"id": str(row["id"]), "inject": row["inject"], "updated": True}}
+
+
+@app.patch("/memory/{memory_id}/review")
+async def set_memory_review(memory_id: str, request: dict):
+    """PATCH /memory/{id}/review — Set review_status."""
+    review_val = request.get("review_status", "")
+    if review_val not in ("reviewed", "excluded", "edited"):
+        raise HTTPException(
+            status_code=400, detail="review_status: reviewed|excluded|edited"
+        )
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "UPDATE memory SET review_status = $2 WHERE id = $1::uuid RETURNING id, review_status",
+        memory_id,
+        review_val,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    await pool.execute(
+        "INSERT INTO audit_log (action, resource_type, resource_id, payload) "
+        "VALUES ('memory.review', 'memory', $1, $2)",
+        memory_id,
+        json.dumps({"review_status": review_val}),
+    )
+    return {
+        "data": {
+            "id": str(row["id"]),
+            "review_status": row["review_status"],
+            "updated": True,
+        }
+    }
+
+
+@app.patch("/memory/{memory_id}/archive")
+async def archive_memory(memory_id: str):
+    """PATCH /memory/{id}/archive — Archive (status=archived, inject=false)."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "UPDATE memory SET status = 'archived', inject = false WHERE id = $1::uuid RETURNING id, status",
+        memory_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    await pool.execute(
+        "INSERT INTO audit_log (action, resource_type, resource_id, payload) "
+        "VALUES ('memory.archive', 'memory', $1, $2)",
+        memory_id,
+        json.dumps({"action": "archive"}),
+    )
+    return {"data": {"id": str(row["id"]), "status": row["status"], "updated": True}}
+
+
 # ═══════════════════════════════════════════════════════════
 # SKILLS & UTILITY ENDPOINTS
 # ═══════════════════════════════════════════════════════════
