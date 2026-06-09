@@ -1720,3 +1720,12 @@ PM reviewed:
 - ❌ Graph / entity nodes / insight engine / Deep Research (out of scope)
 
 **Phase 3+:** Blocked until PM creates new governance scope.
+
+### 2026-06-09 — PM Post-Phase-2 Gate
+
+**Verification debt (1 item):**
+- Vectorize runtime proof: khi `CF_VECTORIZE_TOKEN` được cấu hình, chạy 1 query chứng minh hydrated `created_at` và `confidence_score` từ Vectorize path.
+
+**Gate for new work:**
+- Mọi thay đổi mới về Advisory routing/output, retrieval, schema, UI, hoặc Deep Research phải nộp proposal mới trong §13.
+- Không tự ý thêm code vào các area trên.
