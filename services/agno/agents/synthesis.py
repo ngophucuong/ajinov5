@@ -10,6 +10,31 @@ Trả lời bằng tiếng Việt, ngắn gọn, chính xác.
 Sử dụng dữ liệu tìm kiếm và bộ nhớ doanh nghiệp được cung cấp nếu có.
 Định dạng Markdown khi cần thiết."""
 
+# ─── v6 Advisory Section Enforcement (Proposal 4R2) ─────
+ADVISORY_SECTIONS = [
+    ("Kết luận", "(Không có đủ dữ liệu để đưa ra kết luận.)"),
+    ("Tình huống", "(Không có thông tin cụ thể về tình huống.)"),
+    ("Giả định của tôi", "(Không có giả định nào được xác định.)"),
+    ("Phân tích", "(Không có dữ liệu để phân tích sâu hơn.)"),
+    ("Rủi ro cần lưu ý", "(Không xác định được rủi ro cụ thể.)"),
+    ("Điều tôi chưa chắc", "(Tôi không có điểm nào chưa chắc để nêu.)"),
+]
+
+
+def enforce_advisory_sections(content: str) -> str:
+    """
+    Post-generation enforcement: append any missing Advisory sections.
+    Ensures 6/6 sections are always present when is_advisory=True.
+    Does NOT modify existing content — only appends missing sections.
+    """
+    missing = []
+    for heading, placeholder in ADVISORY_SECTIONS:
+        if heading not in content:
+            missing.append(f"**{heading}:** {placeholder}")
+    if missing:
+        content += "\n\n" + "\n\n".join(missing)
+    return content
+
 
 async def synthesize(
     user_message: str,
@@ -176,6 +201,10 @@ async def synthesize(
             # v6: prepend deterministic confidence warning (PM: not via LLM)
             if confidence_warning:
                 content = f"{confidence_warning}\n\n{content}"
+
+            # v6: enforce Advisory sections (post-generation, deterministic)
+            if is_advisory:
+                content = enforce_advisory_sections(content)
 
             memory_candidates = []
             for sentence in content.split("."):
